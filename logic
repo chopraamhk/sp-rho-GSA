@@ -1,0 +1,24 @@
+file setup
+```{r}
+# foreground genes
+original_gene_list <- resd_sp_sign$Estimate$Estimate_FibroblastI
+names(original_gene_list) <- rownames(resd_sp_sign$Estimate)
+original_gene_list <- na.omit(original_gene_list)
+original_gene_list <- names(original_gene_list)
+
+#background genes
+gene_list <- resd_sp$Estimate$Estimate_FibroblastI
+names(gene_list) <- rownames(resd_sp$Estimate)
+gene_list <- na.omit(gene_list)
+gene_list <- names(gene_list)
+```
+
+Overrepresentation analysis using GO
+```{r}
+msigdb_c5_df <- read.gmt("c5.go.v2025.1.Hs.symbols.gmt")
+msigdb_c5_sets <- split(msigdb_c5_df$gene, msigdb_c5_df$term)
+
+foraRes <- fora(genes=original_gene_list, universe=gene_list, pathways=msigdb_c5_sets, minSize = 3, maxSize = 800)
+
+foraRes <- foraRes[foraRes$padj < 0.05, ]
+foraRes
