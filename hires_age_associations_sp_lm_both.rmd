@@ -1,0 +1,2255 @@
+---
+title: "hires_age_association"
+author: "Mehak Chopra"
+date: "2025-05-28"
+output: html_document
+---
+
+VSMCI
+##cell type specific gene expression with age 
+```{r}
+library(readr)
+library(RegParallel)
+library(data.table)
+library(pheatmap)
+library(ComplexHeatmap)
+library(ComplexHeatmap)
+library(circlize)
+VSMCI <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_VSMC_I_Window52.txt")
+
+transposed_data <- t(VSMCI)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)
+
+vsmc_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+# Convert all gene columns to numeric safely
+gene_data <- vsmc_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+vsmc_merge_clean <- cbind(vsmc_merge[, 1:3], as.data.frame(gene_data))
+
+vsmc_test <- RegParallel(
+    data = vsmc_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(vsmc_merge_clean)[4:13716],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 10,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+vsmc_test <- vsmc_test[vsmc_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+vsmc_test$p.adj <- p.adjust(vsmc_test$P, method = "BH")
+
+
+significant_genes_vsmcI <- vsmc_test %>%
+  dplyr::filter(p.adj < 0.05)
+significant_genes_vsmcI
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe -- extracting the p values from the genes of interest here 
+filtered_genes_vsmc <- vsmc_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+
+###################################################
+
+##mean of gene expression in all samples
+vsmc_gsea <- t(vsmc_merge_clean)
+
+colnames(vsmc_gsea) <- vsmc_gsea[1, ]
+
+vsmc_gsea <- vsmc_gsea[-c(1:3), ]
+
+vsmc_gsea <- as.data.frame(vsmc_gsea)
+
+vsmc_gsea[] <- lapply(vsmc_gsea, function(x) as.numeric(as.character(x)))
+
+vsmc_gsea$Mean_VSMCI <- rowMeans(vsmc_gsea)
+
+vsmc_gsea <- data.frame(RowName = rownames(vsmc_gsea), VSMCI_Mean = vsmc_gsea$Mean_VSMCI)
+
+#vsmc_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+vsmc_genes <- vsmc_gsea[vsmc_gsea$RowName %in% genes, ]
+#vsmc_genes
+
+#write.table(vsmc_gsea, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/vsmc_gsea.txt", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+#VSMC -- spearman's correlation 
+```{r}
+#cor.test(vsmc_merge_clean$age, vsmc_merge_clean$WASH7P, method = "spearman", exact = FALSE)
+
+cor_vsmc <- sapply(vsmc_merge_clean[, 4:13716], function(col) {
+  test <- suppressWarnings(cor.test(vsmc_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+
+# Transpose and convert to data.frame
+vsmc_cor_sp <- as.data.frame(t(cor_vsmc))
+vsmc_cor_sp$Gene <- colnames(vsmc_merge_clean)[4:13716]
+
+vsmc_cor_sp$p.adj <- p.adjust(vsmc_cor_sp$pval, method = "BH")
+
+significant_cor_sp_vsmc <- vsmc_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's vsmc-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_vsmc <- lapply(vsmc_merge_clean[, 4:13716], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = vsmc_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_vsmc) <- colnames(vsmc_merge_clean)[4:13716]
+#str(cor_results[[1]])
+combined_cor_results_vsmc <- do.call(rbind, cor_results_vsmc)
+
+#names(cor_results)
+rownames(combined_cor_results_vsmc) <- names(cor_results_vsmc)
+
+combined_cor_results_vsmc <- tibble::rownames_to_column(as.data.frame(combined_cor_results_vsmc), var = "Gene")
+
+vsmc_se_sp <- merge(vsmc_cor_sp, combined_cor_results_vsmc , by= "Gene")
+
+vsmc_se_sp_sign <- vsmc_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(vsmc_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/vsmc_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+VSMCII
+##cell type specific gene expression with age 
+```{r}
+VSMCII <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_VSMC_II_Window52.txt")
+
+transposed_data <- t(VSMCII)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)
+#metadata
+
+vsmcII_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+# Convert all gene columns to numeric safely
+gene_data <- vsmcII_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+vsmcII_merge_clean <- cbind(vsmcII_merge[, 1:3], as.data.frame(gene_data))
+
+vsmcII_test <- RegParallel(
+    data = vsmcII_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(vsmcII_merge_clean)[4:12095],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 2,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+vsmcII_test <- vsmcII_test[vsmcII_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+vsmcII_test$p.adj <- p.adjust(vsmcII_test$P, method = "BH")
+
+significant_genes_vsmcII <- vsmcII_test %>%
+  dplyr::filter(p.adj < 0.05)
+
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe
+filtered_genes_vsmcII <- vsmcII_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+####################################
+
+##mean of genes in all samples
+vsmcII_gsea <- t(vsmcII_merge_clean)
+
+colnames(vsmcII_gsea) <- vsmcII_gsea[1, ]
+#vsmcII_gsea
+
+vsmcII_gsea <- vsmcII_gsea[-c(1:3), ]
+
+vsmcII_gsea <- as.data.frame(vsmcII_gsea)
+
+vsmcII_gsea[] <- lapply(vsmcII_gsea, function(x) as.numeric(as.character(x)))
+
+vsmcII_gsea$Mean_VSMCII <- rowMeans(vsmcII_gsea)
+
+#rownames(vsmcII_gsea)
+
+vsmcII_gsea <- data.frame(RowName = rownames(vsmcII_gsea), VSMCII_Mean = vsmcII_gsea$Mean_VSMCII)
+
+#vsmcII_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+#vsmcII_gsea$RowName
+vsmcII_genes <- vsmcII_gsea[vsmcII_gsea$RowName %in% genes, ]
+#vsmcII_genes
+
+#write.table(vsmcII_gsea, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/vsmcII_gsea.txt", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+#VSMCII -- spearman's correlation 
+```{r}
+cor_vsmcII <- sapply(vsmcII_merge_clean[, 4:12095], function(col) {
+  test <- suppressWarnings(cor.test(vsmcII_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+# Transpose and convert to data.frame
+vsmcII_cor_sp <- as.data.frame(t(cor_vsmcII))
+vsmcII_cor_sp$Gene <- colnames(vsmcII_merge_clean)[4:12095]
+
+vsmcII_cor_sp$p.adj <- p.adjust(vsmcII_cor_sp$pval, method = "BH")
+
+significant_cor_sp_vsmcII <- vsmcII_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's vsmcII-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_vsmcII <- lapply(vsmcII_merge_clean[, 4:12095], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = vsmcII_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_vsmcII) <- colnames(vsmcII_merge_clean)[4:12095]
+#str(cor_results[[1]])
+combined_cor_results_vsmcII <- do.call(rbind, cor_results_vsmcII)
+
+#names(cor_results)
+rownames(combined_cor_results_vsmcII) <- names(cor_results_vsmcII)
+
+combined_cor_results_vsmcII <- tibble::rownames_to_column(as.data.frame(combined_cor_results_vsmcII), var = "Gene")
+
+vsmcii_se_sp <- merge(vsmcII_cor_sp, combined_cor_results_vsmcII , by= "Gene")
+
+vsmcii_se_sp_sign <- vsmcii_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(vsmcii_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/vsmcii_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+Fibroblast-I
+##cell type specific gene expression with age 
+```{r}
+Fibroblast_I <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_Fibroblast_I_Window52.txt")
+
+transposed_data <- t(Fibroblast_I)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+#transposed_df
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)
+#metadata
+
+fibroblastI_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+# Convert all gene columns to numeric safely
+gene_data <- fibroblastI_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+fibroblastI_merge_clean <- cbind(fibroblastI_merge[, 1:3], as.data.frame(gene_data))
+
+fibroblastI_test <- RegParallel(
+    data = fibroblastI_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(fibroblastI_merge_clean)[4:6038],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 2,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+fibroblastI_test <- fibroblastI_test[fibroblastI_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+fibroblastI_test$p.adj <- p.adjust(fibroblastI_test$P, method = "BH")
+
+significant_genes_fibroblastI <- fibroblastI_test %>%
+  dplyr::filter(p.adj < 0.05)
+
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe
+filtered_genes_fibroblastI <- fibroblastI_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+###################################################################################
+##mean of genes in all samples
+fibroblastI_gsea <- t(fibroblastI_merge_clean)
+
+colnames(fibroblastI_gsea) <- fibroblastI_gsea[1, ]
+#fibroblastI_gsea
+
+fibroblastI_gsea <- fibroblastI_gsea[-c(1:3), ]
+
+fibroblastI_gsea <- as.data.frame(fibroblastI_gsea)
+
+fibroblastI_gsea[] <- lapply(fibroblastI_gsea, function(x) as.numeric(as.character(x)))
+
+fibroblastI_gsea$Mean_fibroblastI <- rowMeans(fibroblastI_gsea)
+
+#rownames(fibroblastI_gsea)
+
+fibroblastI_gsea <- data.frame(RowName = rownames(fibroblastI_gsea), fibroblastI_Mean = fibroblastI_gsea$Mean_fibroblastI)
+
+#fibroblastI_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+#fibroblastI_gsea$RowName
+fibroblastI_genes <- fibroblastI_gsea[fibroblastI_gsea$RowName %in% genes, ]
+#fibroblastI_genes
+############################################################################
+#merging means of all
+#df_list <- list(vsmc_genes, vsmcII_genes, fibroblastI_genes)
+
+#data <- reshape::merge_recurse(df_list)
+#data
+
+#write.table(data, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/data_test_gsea.txt", row.names = FALSE, quote = FALSE, sep = "\t")
+
+#write.table(fibroblastI_gsea, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/fibroblastI_gsea.txt", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+#FibroblastI -- spearman's correlation 
+```{r}
+cor_fibroblastI <- sapply(fibroblastI_merge_clean[, 4:6038], function(col) {
+  test <- suppressWarnings(cor.test(fibroblastI_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+# Transpose and convert to data.frame
+fibroblastI_cor_sp <- as.data.frame(t(cor_fibroblastI))
+fibroblastI_cor_sp$Gene <- colnames(fibroblastI_merge_clean)[4:6038]
+fibroblastI_cor_sp$p.adj <- p.adjust(fibroblastI_cor_sp$pval, method = "BH")
+
+significant_cor_sp_fibroblastI <- fibroblastI_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's fibroblastI-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_fibroblastI <- lapply(fibroblastI_merge_clean[, 4:6038], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = fibroblastI_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_fibroblastI) <- colnames(fibroblastI_merge_clean)[4:6038]
+#str(cor_results[[1]])
+combined_cor_results_fibroblastI <- do.call(rbind, cor_results_fibroblastI)
+
+#names(cor_results)
+rownames(combined_cor_results_fibroblastI) <- names(cor_results_fibroblastI)
+
+combined_cor_results_fibroblastI <- tibble::rownames_to_column(as.data.frame(combined_cor_results_fibroblastI), var = "Gene")
+
+fibroblastI_se_sp <- merge(fibroblastI_cor_sp, combined_cor_results_fibroblastI , by= "Gene")
+
+fibroblastI_se_sp_sign <- fibroblastI_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(fibroblastI_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/fibroblastI_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+Fibroblast-II
+##cell type specific gene expression with age 
+```{r}
+Fibroblast_II <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_Fibroblast_II_Window52.txt")
+
+transposed_data <- t(Fibroblast_II)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+#transposed_df
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)
+#metadata
+
+fibroblastII_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+# Convert all gene columns to numeric safely
+gene_data <- fibroblastII_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+fibroblastII_merge_clean <- cbind(fibroblastII_merge[, 1:3], as.data.frame(gene_data))
+
+fibroblastII_test <- RegParallel(
+    data = fibroblastII_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(fibroblastII_merge_clean)[4:966],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 2,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+fibroblastII_test <- fibroblastII_test[fibroblastII_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+fibroblastII_test$p.adj <- p.adjust(fibroblastII_test$P, method = "BH")
+
+significant_genes_fibroblastII <- fibroblastII_test %>%
+  dplyr::filter(p.adj < 0.05)
+
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe
+filtered_genes_fibroblastII <- fibroblastII_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+#################################
+
+##mean of genes in all samples
+
+fibroblastII_gsea <- t(fibroblastII_merge_clean)
+
+colnames(fibroblastII_gsea) <- fibroblastII_gsea[1, ]
+#fibroblastII_gsea
+
+fibroblastII_gsea <- fibroblastII_gsea[-c(1:3), ]
+
+fibroblastII_gsea <- as.data.frame(fibroblastII_gsea)
+
+fibroblastII_gsea[] <- lapply(fibroblastII_gsea, function(x) as.numeric(as.character(x)))
+
+fibroblastII_gsea$Mean_fibroblastII <- rowMeans(fibroblastII_gsea)
+
+#rownames(fibroblastII_gsea)
+
+fibroblastII_gsea <- data.frame(RowName = rownames(fibroblastII_gsea), fibroblastII_Mean = fibroblastII_gsea$Mean_fibroblastII)
+
+#fibroblastII_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+fibroblastII_genes <- fibroblastII_gsea[fibroblastII_gsea$RowName %in% genes, ]
+#fibroblastII_genes
+
+#write.table(fibroblastII, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/fibroblastII_gsea.txt", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+#FibroblastII -- spearman's correlation 
+```{r}
+cor_fibroblastII <- sapply(fibroblastII_merge_clean[, 4:966], function(col) {
+  test <- suppressWarnings(cor.test(fibroblastII_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+# Transpose and convert to data.frame
+fibroblastII_cor_sp <- as.data.frame(t(cor_fibroblastII))
+fibroblastII_cor_sp$Gene <- colnames(fibroblastII_merge_clean)[4:966]
+
+fibroblastII_cor_sp$p.adj <- p.adjust(fibroblastII_cor_sp$pval, method = "BH")
+
+significant_cor_sp_fibroblastII <- fibroblastII_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's fibroblastII-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_fibroblastII <- lapply(fibroblastII_merge_clean[, 4:966], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = fibroblastII_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_fibroblastII) <- colnames(fibroblastII_merge_clean)[4:966]
+#str(cor_results[[1]])
+combined_cor_results_fibroblastII <- do.call(rbind, cor_results_fibroblastII)
+
+#names(cor_results)
+rownames(combined_cor_results_fibroblastII) <- names(cor_results_fibroblastII)
+
+combined_cor_results_fibroblastII <- tibble::rownames_to_column(as.data.frame(combined_cor_results_fibroblastII), var = "Gene")
+
+fibroblastII_se_sp <- merge(fibroblastII_cor_sp, combined_cor_results_fibroblastII , by= "Gene")
+
+fibroblastII_se_sp_sign <- fibroblastII_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(fibroblastII_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/fibroblastII_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+Pericyte
+##cell type specific gene expression with age 
+```{r}
+Pericyte <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_Pericyte_Window52.txt")
+
+transposed_data <- t(Pericyte)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+#transposed_df
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)#merging means of all
+#df_list <- list(vsmc_genes, vsmcII_genes, fibroblastI_genes)
+
+#data <- reshape::merge_recurse(df_list)
+#data
+#metadata
+
+Pericyte_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+# Convert all gene columns to numeric safely
+gene_data <- Pericyte_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+Pericyte_merge_clean <- cbind(Pericyte_merge[, 1:3], as.data.frame(gene_data))
+#Pericyte_merge_clean
+Pericyte_test <- RegParallel(
+    data = Pericyte_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(Pericyte_merge_clean)[4:1740],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 2,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+Pericyte_test <- Pericyte_test[Pericyte_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+Pericyte_test$p.adj <- p.adjust(Pericyte_test$P, method = "BH")
+
+significant_genes_Pericyte <- Pericyte_test %>%
+  dplyr::filter(p.adj < 0.05)
+
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe
+filtered_genes_Pericyte <- Pericyte_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+###################################################
+##mean of genes in all samples
+
+Pericyte_gsea <- t(Pericyte_merge_clean)
+
+colnames(Pericyte_gsea) <- Pericyte_gsea[1, ]
+#Pericyte_gsea
+
+Pericyte_gsea <- Pericyte_gsea[-c(1:3), ]
+
+Pericyte_gsea <- as.data.frame(Pericyte_gsea)
+
+Pericyte_gsea[] <- lapply(Pericyte_gsea, function(x) as.numeric(as.character(x)))
+
+Pericyte_gsea$Mean_Pericyte <- rowMeans(Pericyte_gsea)
+
+#rownames(Pericyte_gsea)
+
+Pericyte_gsea <- data.frame(RowName = rownames(Pericyte_gsea), Pericyte_Mean = Pericyte_gsea$Mean_Pericyte)
+
+#Pericyte_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+Pericyte_genes <- Pericyte_gsea[Pericyte_gsea$RowName %in% genes, ]
+#Pericyte_genes
+```
+
+#Pericyte -- spearman's correlation 
+```{r}
+cor_Pericyte <- sapply(Pericyte_merge_clean[, 4:1740], function(col) {
+  test <- suppressWarnings(cor.test(Pericyte_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+# Transpose and convert to data.frame
+Pericyte_cor_sp <- as.data.frame(t(cor_Pericyte))
+Pericyte_cor_sp$Gene <- colnames(Pericyte_merge_clean)[4:1740]
+
+Pericyte_cor_sp$p.adj <- p.adjust(Pericyte_cor_sp$pval, method = "BH")
+
+significant_cor_sp_Pericyte <- Pericyte_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's Pericyte-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_Pericyte <- lapply(Pericyte_merge_clean[, 4:1740], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = Pericyte_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_Pericyte) <- colnames(Pericyte_merge_clean)[4:1740]
+#str(cor_results[[1]])
+combined_cor_results_Pericyte <- do.call(rbind, cor_results_Pericyte)
+
+#names(cor_results)
+rownames(combined_cor_results_Pericyte) <- names(cor_results_Pericyte)
+
+combined_cor_results_Pericyte <- tibble::rownames_to_column(as.data.frame(combined_cor_results_Pericyte), var = "Gene")
+
+Pericyte_se_sp <- merge(Pericyte_cor_sp, combined_cor_results_Pericyte , by= "Gene")
+
+Pericyte_se_sp_sign <- Pericyte_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(Pericyte_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/Pericyte_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+Endothelial I
+##cell type specific gene expression with age 
+```{r}
+endothelialI <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_Endothelial_I_Window52.txt")
+
+transposed_data <- t(endothelialI)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+#transposed_df
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)
+#metadata
+
+endothelialI_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+# Convert all gene columns to numeric safely
+gene_data <- endothelialI_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+endothelialI_merge_clean <- cbind(endothelialI_merge[, 1:3], as.data.frame(gene_data))
+#endothelialI_merge_clean
+endothelialI_test <- RegParallel(
+    data = endothelialI_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(endothelialI_merge_clean)[4:901],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 2,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+endothelialI_test <- endothelialI_test[endothelialI_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+endothelialI_test$p.adj <- p.adjust(endothelialI_test$P, method = "BH")
+
+significant_genes_endothelialI <- endothelialI_test %>%
+  dplyr::filter(p.adj < 0.05)
+
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe
+filtered_genes_endothelialI <- endothelialI_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+
+#######################
+##mean of genes in all samples
+
+endothelialI_gsea <- t(endothelialI_merge_clean)
+
+colnames(endothelialI_gsea) <- endothelialI_gsea[1, ]
+#endothelialI_gsea
+
+endothelialI_gsea <- endothelialI_gsea[-c(1:3), ]
+
+endothelialI_gsea <- as.data.frame(endothelialI_gsea)
+
+endothelialI_gsea[] <- lapply(endothelialI_gsea, function(x) as.numeric(as.character(x)))
+
+endothelialI_gsea$Mean_endothelialI <- rowMeans(endothelialI_gsea)
+
+#rownames(endothelialI_gsea)
+
+endothelialI_gsea <- data.frame(RowName = rownames(endothelialI_gsea), endothelialI_Mean = endothelialI_gsea$Mean_endothelialI)
+
+#endothelialI_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+endothelialI_genes <- endothelialI_gsea[endothelialI_gsea$RowName %in% genes, ]
+#endothelialI_genes
+```
+#endothelialI -- spearman's correlation 
+```{r}
+cor_endothelialI <- sapply(endothelialI_merge_clean[, 4:901], function(col) {
+  test <- suppressWarnings(cor.test(endothelialI_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+# Transpose and convert to data.frame
+endothelialI_cor_sp <- as.data.frame(t(cor_endothelialI))
+endothelialI_cor_sp$Gene <- colnames(endothelialI_merge_clean)[4:901]
+
+endothelialI_cor_sp$p.adj <- p.adjust(endothelialI_cor_sp$pval, method = "BH")
+
+significant_cor_sp_endothelialI <- endothelialI_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's endothelialI-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_endothelialI <- lapply(endothelialI_merge_clean[, 4:901], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = endothelialI_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_endothelialI) <- colnames(endothelialI_merge_clean)[4:901]
+#str(cor_results[[1]])
+combined_cor_results_endothelialI <- do.call(rbind, cor_results_endothelialI)
+
+#names(cor_results)
+rownames(combined_cor_results_endothelialI) <- names(cor_results_endothelialI)
+
+combined_cor_results_endothelialI <- tibble::rownames_to_column(as.data.frame(combined_cor_results_endothelialI), var = "Gene")
+
+endothelialI_se_sp <- merge(endothelialI_cor_sp, combined_cor_results_endothelialI , by= "Gene")
+
+endothelialI_se_sp_sign <- endothelialI_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(endothelialI_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/endothelialI_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+Endothelial II
+##cell type specific gene expression with age 
+```{r}
+endothelialII <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_Endothelial_II_Window52.txt")
+
+transposed_data <- t(endothelialII)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+#transposed_df
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)
+#metadata
+
+endothelialII_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+
+# Convert all gene columns to numeric safely
+gene_data <- endothelialII_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+endothelialII_merge_clean <- cbind(endothelialII_merge[, 1:3], as.data.frame(gene_data))
+#endothelialII_merge_clean
+endothelialII_test <- RegParallel(
+    data = endothelialII_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(endothelialII_merge_clean)[4:1348],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 2,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+endothelialII_test <- endothelialII_test[endothelialII_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+endothelialII_test$p.adj <- p.adjust(endothelialII_test$P, method = "BH")
+
+significant_genes_endothelialII <- endothelialII_test %>%
+  dplyr::filter(p.adj < 0.05)
+
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe
+filtered_genes_endothelialII <- endothelialII_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+######################################
+##mean of genes in all samples
+
+endothelialII_gsea <- t(endothelialII_merge_clean)
+
+colnames(endothelialII_gsea) <- endothelialII_gsea[1, ]
+#endothelialII_gsea
+
+endothelialII_gsea <- endothelialII_gsea[-c(1:3), ]
+
+endothelialII_gsea <- as.data.frame(endothelialII_gsea)
+
+endothelialII_gsea[] <- lapply(endothelialII_gsea, function(x) as.numeric(as.character(x)))
+
+endothelialII_gsea$Mean_endothelialII <- rowMeans(endothelialII_gsea)
+
+#rownames(endothelialII_gsea)
+
+endothelialII_gsea <- data.frame(RowName = rownames(endothelialII_gsea), endothelialII_Mean = endothelialII_gsea$Mean_endothelialII)
+
+#endothelialII_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+endothelialII_genes <- endothelialII_gsea[endothelialII_gsea$RowName %in% genes, ]
+#endothelialII_genes
+```
+
+#endothelialII -- spearman's correlation 
+```{r}
+cor_endothelialII <- sapply(endothelialII_merge_clean[, 4:1348], function(col) {
+  test <- suppressWarnings(cor.test(endothelialII_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+# Transpose and convert to data.frame
+endothelialII_cor_sp <- as.data.frame(t(cor_endothelialII))
+endothelialII_cor_sp$Gene <- colnames(endothelialII_merge_clean)[4:1348]
+
+endothelialII_cor_sp$p.adj <- p.adjust(endothelialII_cor_sp$pval, method = "BH")
+
+significant_cor_sp_endothelialII <- endothelialII_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's endothelialII-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_endothelialII <- lapply(endothelialII_merge_clean[, 4:1348], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = endothelialII_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_endothelialII) <- colnames(endothelialII_merge_clean)[4:1348]
+#str(cor_results[[1]])
+combined_cor_results_endothelialII <- do.call(rbind, cor_results_endothelialII)
+
+#names(cor_results)
+rownames(combined_cor_results_endothelialII) <- names(cor_results_endothelialII)
+
+combined_cor_results_endothelialII <- tibble::rownames_to_column(as.data.frame(combined_cor_results_endothelialII), var = "Gene")
+
+endothelialII_se_sp <- merge(endothelialII_cor_sp, combined_cor_results_endothelialII , by= "Gene")
+
+endothelialII_se_sp_sign <- endothelialII_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(endothelialII_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/endothelialII_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+Lymphatic Endothelial 
+##cell type specific gene expression with age 
+```{r}
+lym_endothelial <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_Lymphatic_Endothelial_Window52.txt")
+
+transposed_data <- t(lym_endothelial)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+#transposed_df
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)
+#metadata
+
+lym_endothelial_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+# Convert all gene columns to numeric safely
+gene_data <- lym_endothelial_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+lym_endothelial_merge_clean <- cbind(lym_endothelial_merge[, 1:3], as.data.frame(gene_data))
+#lym_endothelial_merge_clean
+lym_endothelial_test <- RegParallel(
+    data = lym_endothelial_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(lym_endothelial_merge_clean)[4:782],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 2,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+lym_endothelial_test <- lym_endothelial_test[lym_endothelial_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+lym_endothelial_test$p.adj <- p.adjust(lym_endothelial_test$P, method = "BH")
+
+significant_genes_lym_endothelial <- lym_endothelial_test %>%
+  dplyr::filter(p.adj < 0.05)
+
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe
+filtered_genes_lym_endothelial <- lym_endothelial_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+#################################
+##mean of genes in all samples
+
+lym_endothelial_gsea <- t(lym_endothelial_merge_clean)
+
+colnames(lym_endothelial_gsea) <- lym_endothelial_gsea[1, ]
+#lym_endothelial_gsea
+
+lym_endothelial_gsea <- lym_endothelial_gsea[-c(1:3), ]
+
+lym_endothelial_gsea <- as.data.frame(lym_endothelial_gsea)
+
+lym_endothelial_gsea[] <- lapply(lym_endothelial_gsea, function(x) as.numeric(as.character(x)))
+
+lym_endothelial_gsea$Mean_lym_endothelial <- rowMeans(lym_endothelial_gsea)
+
+#rownames(lym_endothelial_gsea)
+
+lym_endothelial_gsea <- data.frame(RowName = rownames(lym_endothelial_gsea), lym_endothelial_Mean = lym_endothelial_gsea$Mean_lym_endothelial)
+
+#lym_endothelial_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+lym_endothelial_genes <- lym_endothelial_gsea[lym_endothelial_gsea$RowName %in% genes, ]
+#lym_endothelial_genes
+```
+
+#lym_endothelial -- spearman's correlation 
+```{r}
+cor_lym_endothelial <- sapply(lym_endothelial_merge_clean[, 4:782], function(col) {
+  test <- suppressWarnings(cor.test(lym_endothelial_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+# Transpose and convert to data.frame
+lym_endothelial_cor_sp <- as.data.frame(t(cor_lym_endothelial))
+lym_endothelial_cor_sp$Gene <- colnames(lym_endothelial_merge_clean)[4:782]
+
+lym_endothelial_cor_sp$p.adj <- p.adjust(lym_endothelial_cor_sp$pval, method = "BH")
+
+significant_cor_sp_lym_endothelial <- lym_endothelial_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's lym_endothelial-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_lym_endothelial <- lapply(lym_endothelial_merge_clean[, 4:782], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = lym_endothelial_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_lym_endothelial) <- colnames(lym_endothelial_merge_clean)[4:782]
+#str(cor_results[[1]])
+combined_cor_results_lym_endothelial <- do.call(rbind, cor_results_lym_endothelial)
+
+#names(cor_results)
+rownames(combined_cor_results_lym_endothelial) <- names(cor_results_lym_endothelial)
+
+combined_cor_results_lym_endothelial <- tibble::rownames_to_column(as.data.frame(combined_cor_results_lym_endothelial), var = "Gene")
+
+lym_endothelial_se_sp <- merge(lym_endothelial_cor_sp, combined_cor_results_lym_endothelial , by= "Gene")
+
+lym_endothelial_se_sp_sign <- lym_endothelial_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(lym_endothelial_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/lym_endothelial_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+Lymphocytes
+##cell type specific gene expression with age 
+```{r}
+lymphocyte <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_Lymphocyte_Window52.txt")
+
+transposed_data <- t(lymphocyte)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+#transposed_df
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)
+#metadata
+
+lymphocyte_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+# Convert all gene columns to numeric safely
+gene_data <- lymphocyte_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+lymphocyte_merge_clean <- cbind(lymphocyte_merge[, 1:3], as.data.frame(gene_data))
+lymphocyte_merge_clean
+lymphocyte_test <- RegParallel(
+    data = lymphocyte_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(lymphocyte_merge_clean)[4:4133],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 2,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+lymphocyte_test <- lymphocyte_test[lymphocyte_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+lymphocyte_test$p.adj <- p.adjust(lymphocyte_test$P, method = "BH")
+
+significant_genes_lymphocyte <- lymphocyte_test %>%
+  dplyr::filter(p.adj < 0.05)
+
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe
+filtered_genes_lymphocyte <- lymphocyte_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+############################################################
+##mean of genes in all samples
+
+lymphocyte_gsea <- t(lymphocyte_merge_clean)
+
+colnames(lymphocyte_gsea) <- lymphocyte_gsea[1, ]
+#lymphocyte_gsea
+
+lymphocyte_gsea <- lymphocyte_gsea[-c(1:3), ]
+
+lymphocyte_gsea <- as.data.frame(lymphocyte_gsea)
+
+lymphocyte_gsea[] <- lapply(lymphocyte_gsea, function(x) as.numeric(as.character(x)))
+
+lymphocyte_gsea$Mean_lymphocyte <- rowMeans(lymphocyte_gsea)
+
+#rownames(lymphocyte_gsea)
+
+lymphocyte_gsea <- data.frame(RowName = rownames(lymphocyte_gsea), lymphocyte_Mean = lymphocyte_gsea$Mean_lymphocyte)
+
+#lymphocyte_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+lymphocyte_genes <- lymphocyte_gsea[lymphocyte_gsea$RowName %in% genes, ]
+#lymphocyte_genes
+```
+
+#lymphocyte -- spearman's correlation 
+```{r}
+cor_lymphocyte <- sapply(lymphocyte_merge_clean[, 4:4133], function(col) {
+  test <- suppressWarnings(cor.test(lymphocyte_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+# Transpose and convert to data.frame
+lymphocyte_cor_sp <- as.data.frame(t(cor_lymphocyte))
+lymphocyte_cor_sp$Gene <- colnames(lymphocyte_merge_clean)[4:4133]
+
+lymphocyte_cor_sp$p.adj <- p.adjust(lymphocyte_cor_sp$pval, method = "BH")
+
+significant_cor_sp_lymphocyte <- lymphocyte_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's lymphocyte-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_lymphocyte <- lapply(lymphocyte_merge_clean[, 4:4133], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = lymphocyte_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_lymphocyte) <- colnames(lymphocyte_merge_clean)[4:4133]
+#str(cor_results[[1]])
+combined_cor_results_lymphocyte <- do.call(rbind, cor_results_lymphocyte)
+
+#names(cor_results)
+rownames(combined_cor_results_lymphocyte) <- names(cor_results_lymphocyte)
+
+combined_cor_results_lymphocyte <- tibble::rownames_to_column(as.data.frame(combined_cor_results_lymphocyte), var = "Gene")
+
+lymphocyte_se_sp <- merge(lymphocyte_cor_sp, combined_cor_results_lymphocyte , by= "Gene")
+
+lymphocyte_se_sp_sign <- lymphocyte_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(lymphocyte_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/lymphocyte_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+Macrophage
+##cell type specific gene expression with age 
+```{r}
+macrophage <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_Macrophage_Window52.txt")
+
+transposed_data <- t(macrophage)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+#transposed_df
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)
+#metadata
+
+macrophage_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+# Convert all gene columns to numeric safely
+gene_data <- macrophage_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+macrophage_merge_clean <- cbind(macrophage_merge[, 1:3], as.data.frame(gene_data))
+#macrophage_merge_clean
+macrophage_test <- RegParallel(
+    data = macrophage_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(macrophage_merge_clean)[4:4621],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 2,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+macrophage_test <- macrophage_test[macrophage_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+macrophage_test$p.adj <- p.adjust(macrophage_test$P, method = "BH")
+
+significant_genes_macrophage <- macrophage_test %>%
+  dplyr::filter(p.adj < 0.05)
+
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe
+filtered_genes_macrophage <- macrophage_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+######################################################
+##mean of genes in all samples
+
+macrophage_gsea <- t(macrophage_merge_clean)
+
+colnames(macrophage_gsea) <- macrophage_gsea[1, ]
+#macrophage_gsea
+
+macrophage_gsea <- macrophage_gsea[-c(1:3), ]
+
+macrophage_gsea <- as.data.frame(macrophage_gsea)
+
+macrophage_gsea[] <- lapply(macrophage_gsea, function(x) as.numeric(as.character(x)))
+
+macrophage_gsea$Mean_macrophage <- rowMeans(macrophage_gsea)
+
+#rownames(macrophage_gsea)
+
+macrophage_gsea <- data.frame(RowName = rownames(macrophage_gsea), macrophage_Mean = macrophage_gsea$Mean_macrophage)
+
+#macrophage_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+macrophage_genes <- macrophage_gsea[macrophage_gsea$RowName %in% genes, ]
+#macrophage_genes
+```
+
+#macrophage -- spearman's correlation 
+```{r}
+cor_macrophage <- sapply(macrophage_merge_clean[, 4:4621], function(col) {
+  test <- suppressWarnings(cor.test(macrophage_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+# Transpose and convert to data.frame
+macrophage_cor_sp <- as.data.frame(t(cor_macrophage))
+macrophage_cor_sp$Gene <- colnames(macrophage_merge_clean)[4:4621]
+
+macrophage_cor_sp$p.adj <- p.adjust(macrophage_cor_sp$pval, method = "BH")
+
+significant_cor_sp_macrophage <- macrophage_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's macrophage-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_macrophage <- lapply(macrophage_merge_clean[, 4:4621], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = macrophage_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_macrophage) <- colnames(macrophage_merge_clean)[4:4621]
+#str(cor_results[[1]])
+combined_cor_results_macrophage <- do.call(rbind, cor_results_macrophage)
+
+#names(cor_results)
+rownames(combined_cor_results_macrophage) <- names(cor_results_macrophage)
+
+combined_cor_results_macrophage <- tibble::rownames_to_column(as.data.frame(combined_cor_results_macrophage), var = "Gene")
+
+macrophage_se_sp <- merge(macrophage_cor_sp, combined_cor_results_macrophage, by= "Gene")
+
+macrophage_se_sp_sign <- macrophage_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(macrophage_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/macrophage_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+Mesothelial
+##cell type specific gene expression with age 
+```{r}
+mesothelial <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_Mesothelial_Window52.txt")
+
+transposed_data <- t(mesothelial)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+#transposed_df
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)
+#metadata
+
+mesothelial_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+
+# Convert all gene columns to numeric safely
+gene_data <- mesothelial_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+mesothelial_merge_clean <- cbind(mesothelial_merge[, 1:3], as.data.frame(gene_data))
+#mesothelial_merge_clean
+mesothelial_test <- RegParallel(
+    data = mesothelial_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(mesothelial_merge_clean)[4:2992],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 2,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+mesothelial_test <- mesothelial_test[mesothelial_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+mesothelial_test$p.adj <- p.adjust(mesothelial_test$P, method = "BH")
+
+significant_genes_mesothelial <- mesothelial_test %>%
+  dplyr::filter(p.adj < 0.05)
+
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe
+filtered_genes_mesothelial <- mesothelial_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+
+# mean of genes in all samples
+
+mesothelial_gsea <- t(mesothelial_merge_clean)
+
+colnames(mesothelial_gsea) <- mesothelial_gsea[1, ]
+#mesothelial_gsea
+
+mesothelial_gsea <- mesothelial_gsea[-c(1:3), ]
+
+mesothelial_gsea <- as.data.frame(mesothelial_gsea)
+
+mesothelial_gsea[] <- lapply(mesothelial_gsea, function(x) as.numeric(as.character(x)))
+
+mesothelial_gsea$Mean_mesothelial <- rowMeans(mesothelial_gsea)
+
+#rownames(mesothelial_gsea)
+
+mesothelial_gsea <- data.frame(RowName = rownames(mesothelial_gsea), mesothelial_Mean = mesothelial_gsea$Mean_mesothelial)
+
+#mesothelial_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+mesothelial_genes <- mesothelial_gsea[mesothelial_gsea$RowName %in% genes, ]
+#mesothelial_genes
+```
+
+#mesothelial -- spearman's correlation 
+```{r}
+cor_mesothelial <- sapply(mesothelial_merge_clean[, 4:2992], function(col) {
+  test <- suppressWarnings(cor.test(mesothelial_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+# Transpose and convert to data.frame
+mesothelial_cor_sp <- as.data.frame(t(cor_mesothelial))
+mesothelial_cor_sp$Gene <- colnames(mesothelial_merge_clean)[4:2992]
+
+mesothelial_cor_sp$p.adj <- p.adjust(mesothelial_cor_sp$pval, method = "BH")
+
+significant_cor_sp_mesothelial <- mesothelial_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's mesothelial-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_mesothelial <- lapply(mesothelial_merge_clean[, 4:2992], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = mesothelial_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_mesothelial) <- colnames(mesothelial_merge_clean)[4:2992]
+#str(cor_results[[1]])
+combined_cor_results_mesothelial <- do.call(rbind, cor_results_mesothelial)
+
+#names(cor_results)
+rownames(combined_cor_results_mesothelial) <- names(cor_results_mesothelial)
+
+combined_cor_results_mesothelial <- tibble::rownames_to_column(as.data.frame(combined_cor_results_mesothelial), var = "Gene")
+
+mesothelial_se_sp <- merge(mesothelial_cor_sp, combined_cor_results_mesothelial, by= "Gene")
+
+mesothelial_se_sp_sign <- mesothelial_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(mesothelial_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/mesothelial_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+Neuronal
+##cell type specific gene expression with age 
+```{r}
+neuronal <- fread("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/CIBERSORTxHiRes_NA_Neuron_Window52.txt")
+
+transposed_data <- t(neuronal)
+
+transposed_df <- as.data.frame(transposed_data)
+
+transposed_df$Mixture <- rownames(transposed_df)
+
+transposed_df <- transposed_df[, c(ncol(transposed_df), 1:(ncol(transposed_df)-1))]
+
+rownames(transposed_df) <- NULL
+
+#transposed_df
+
+colnames(transposed_df) <- transposed_df[1, ]
+transposed_df <- transposed_df[-1, ]
+
+colnames(transposed_df)[1] <- "Mixture"
+
+metadata <- read.table("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/gtex_metadata.txt", h=T)
+#metadata
+
+neuronal_merge <- merge(metadata, transposed_df, by = "Mixture")
+
+# Convert all gene columns to numeric safely
+gene_data <- neuronal_merge[, 4:54595]
+gene_data <- lapply(gene_data, function(x) as.numeric(as.character(x)))
+
+# Filter out genes with no variation
+gene_data <- gene_data[sapply(gene_data, function(x) length(unique(x[!is.na(x)])) > 1)]
+
+# Update the data frame
+neuronal_merge_clean <- cbind(neuronal_merge[, 1:3], as.data.frame(gene_data))
+#neuronal_merge_clean
+neuronal_test <- RegParallel(
+    data = neuronal_merge_clean,
+    formula = "[*] ~  age + sex",
+    FUN = function(formula, data)
+      lm(formula = formula, data = data),
+    FUNtype = "lm",
+   variables = colnames(neuronal_merge_clean)[4:106],
+    blocksize = 100,
+    p.adjust = "none",
+    cores = 2,
+    nestedParallel = FALSE,
+    conflevel = 95)
+
+# Filter for rows where the term is "age"
+neuronal_test <- neuronal_test[neuronal_test$Term == "age", ]
+
+# Adjust the p-values for multiple testing
+neuronal_test$p.adj <- p.adjust(neuronal_test$P, method = "BH")
+
+significant_genes_neuronal <- neuronal_test %>%
+  dplyr::filter(p.adj < 0.05)
+
+###Extract only the rows where our genes of interests are available 
+genes_of_interest <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+# Filter the dataframe
+filtered_genes_neuronal <- neuronal_test %>%
+  dplyr::filter(Variable %in% genes_of_interest)
+
+################################################################
+
+##mean of genes in all samples
+
+neuronal_gsea <- t(neuronal_merge_clean)
+
+colnames(neuronal_gsea) <- neuronal_gsea[1, ]
+#neuronal_gsea
+
+neuronal_gsea <- neuronal_gsea[-c(1:3), ]
+
+neuronal_gsea <- as.data.frame(neuronal_gsea)
+
+neuronal_gsea[] <- lapply(neuronal_gsea, function(x) as.numeric(as.character(x)))
+
+neuronal_gsea$Mean_neuronal <- rowMeans(neuronal_gsea)
+
+#rownames(neuronal_gsea)
+
+neuronal_gsea <- data.frame(RowName = rownames(neuronal_gsea), neuronal_Mean = neuronal_gsea$Mean_neuronal)
+
+#neuronal_gsea
+
+##extract only rownames where genes of interests are present
+genes <- c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37")
+
+neuronal_genes <- neuronal_gsea[neuronal_gsea$RowName %in% genes, ]
+#neuronal_genes
+```
+
+#neuronal -- spearman's correlation 
+```{r}
+cor_neuronal <- sapply(neuronal_merge_clean[, 4:106], function(col) {
+  test <- suppressWarnings(cor.test(neuronal_merge_clean$age, col, method = "spearman"))
+  c(cor = test$estimate, pval = test$p.value)
+})
+
+# Transpose and convert to data.frame
+neuronal_cor_sp <- as.data.frame(t(cor_neuronal))
+neuronal_cor_sp$Gene <- colnames(neuronal_merge_clean)[4:106]
+
+neuronal_cor_sp$p.adj <- p.adjust(neuronal_cor_sp$pval, method = "BH")
+
+significant_cor_sp_neuronal <- neuronal_cor_sp %>%
+  dplyr::filter(p.adj < 0.05)
+```
+
+##standard error from spearman's neuronal-----
+```{r}
+library(statpsych)
+
+# Use lapply for clarity, then simplify to matrix/data.frame if needed
+cor_results_neuronal <- lapply(neuronal_merge_clean[, 4:106], function(current_col_vector) {
+  # Ensure the current column is numeric before attempting correlation
+  if (is.numeric(current_col_vector)) {
+    suppressWarnings(
+      statpsych::ci.spear(alpha = 0.05, y = neuronal_merge_clean$age, x = current_col_vector)
+    )
+  } else {
+    # Handle non-numeric columns, e.g., return NA or a specific message
+    warning(paste("Column '", deparse(substitute(current_col_vector)), "' is not numeric and was skipped.", sep=""))
+    return(NA) # Or some other indicator for skipped columns
+  }
+})
+
+#names(cor_results)[1:5]
+
+# Optional: simplify to matrix if all outputs are of same length/structure
+names(cor_results_neuronal) <- colnames(neuronal_merge_clean)[4:106]
+#str(cor_results[[1]])
+combined_cor_results_neuronal <- do.call(rbind, cor_results_neuronal)
+
+#names(cor_results)
+rownames(combined_cor_results_neuronal) <- names(cor_results_neuronal)
+
+combined_cor_results_neuronal <- tibble::rownames_to_column(as.data.frame(combined_cor_results_neuronal), var = "Gene")
+
+neuronal_se_sp <- merge(neuronal_cor_sp, combined_cor_results_neuronal, by= "Gene")
+
+neuronal_se_sp_sign <- neuronal_se_sp %>%
+  dplyr::filter(p.adj < 0.05)
+
+#write.csv(neuronal_se_sp, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/neuronal_se.csv", row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+upset plot from spearman correlation
+```{r}
+# Install and load UpSetR if you haven't
+#install.packages("UpSetR")
+library(UpSetR)
+
+# Define gene sets
+gene_sets_sp <- list(
+  "VSMC-I" = rownames(significant_cor_sp_vsmc),
+  "VSMC-II" = rownames(significant_cor_sp_vsmcII),
+  "Pericyte" = rownames(significant_cor_sp_Pericyte),
+  "Fibroblast-I" = rownames(significant_cor_sp_fibroblastI),
+  "Fibroblast-II" = rownames(significant_cor_sp_fibroblastII),
+  "Endothelial-I" = rownames(significant_cor_sp_endothelialI),
+  "Endothelial-II" = rownames(significant_cor_sp_endothelialII),
+  "Lymphatic Endothelial" = rownames(significant_cor_sp_lym_endothelial),
+  "Lymphocyte" = rownames(significant_cor_sp_lymphocyte),
+  "Macrophage" = rownames(significant_cor_sp_macrophage),
+  "Mesothelial" = rownames(significant_cor_sp_mesothelial),
+  "Neuronal" = rownames(significant_cor_sp_neuronal)
+)
+
+input_df_sp <- fromList(gene_sets_sp)
+#dim(input_df)
+
+#png("upset_plot_sp_cor.png", width = 1800, height = 800, res = 150)
+
+# Draw the UpSet plot (do NOT assign to `p`)
+upset(input_df_sp, nsets = 12, order.by = "freq")
+
+# Close the device
+#dev.off()
+```
+
+R-values 
+```{r}
+names(significant_cor_sp_vsmc)[1] <- "VSMC-I"
+names(significant_cor_sp_vsmcII)[1] <- "VSMC-II"
+names(significant_cor_sp_fibroblastI)[1] <- "Fibroblast-I"
+names(significant_cor_sp_fibroblastII)[1] <- "Fibroblast-II"
+names(significant_cor_sp_Pericyte)[1] <- "Pericyte"
+names(significant_cor_sp_endothelialI)[1] <- "Endothelial-I"
+names(significant_cor_sp_endothelialII)[1] <- "Endothelial-II"
+names(significant_cor_sp_lym_endothelial)[1] <- "Lymphatic Endothelial"
+names(significant_cor_sp_lymphocyte)[1] <- "Lymphocyte"
+names(significant_cor_sp_macrophage)[1] <- "Macrophage"
+names(significant_cor_sp_mesothelial)[1] <- "Mesothelial"
+names(significant_cor_sp_neuronal)[1] <- "Neuronal"
+
+r_sp_vsmc <- significant_cor_sp_vsmc[, c(3, 1)]
+r_sp_vsmcII <- significant_cor_sp_vsmcII[, c(3, 1)]
+r_sp_fibroblastI <- significant_cor_sp_fibroblastI[, c(3, 1)]
+r_sp_fibroblastII <- significant_cor_sp_fibroblastII[, c(3, 1)]
+r_sp_Pericyte <- significant_cor_sp_Pericyte[, c(3, 1)]
+r_sp_endothelialI <- significant_cor_sp_endothelialI[, c(3, 1)]
+r_sp_endothelialII <- significant_cor_sp_endothelialII[, c(3, 1)]
+r_sp_lym_endothelial <- significant_cor_sp_lym_endothelial[, c(3, 1)]
+r_sp_lymphocyte <- significant_cor_sp_lymphocyte[, c(3, 1)]
+r_sp_macrophage <- significant_cor_sp_macrophage[, c(3, 1)]
+r_sp_mesothelial <- significant_cor_sp_mesothelial[, c(3, 1)]
+r_sp_neuronal <- significant_cor_sp_neuronal[, c(3, 1)]
+
+r_sp <- list(r_sp_vsmc, r_sp_vsmcII, r_sp_fibroblastI, r_sp_fibroblastII, r_sp_Pericyte, r_sp_endothelialI, r_sp_endothelialII, r_sp_lym_endothelial, r_sp_lymphocyte, r_sp_macrophage, r_sp_mesothelial, r_sp_neuronal)
+
+sp_list_genes <- reshape::merge_recurse(r_sp)
+sp_list_genes
+
+r_sp_list_genes <- reshape::merge_recurse(r_sp)
+r_sp_list_genes
+```
+
+##heatmap with spearman correlation plot
+```{r}
+# Convert to matrix
+sp_list_genes
+rownames(sp_list_genes) <- sp_list_genes$Gene
+sp_list_genes <- sp_list_genes[, -1]
+
+pval_mat <- as.matrix(sp_list_genes)
+pval_mat
+
+str(pval_mat)
+
+# Save the rownames first
+gene_names <- rownames(pval_mat)
+
+# Convert the matrix values to numeric safely
+pval_mat <- apply(pval_mat, 2, function(x) as.numeric(as.character(x)))
+pval_mat <- as.matrix(pval_mat)
+
+#pval_mat[is.infinite(pval_mat)] <- 0  # replace Inf/-Inf, just in case
+
+# Restore the rownames
+rownames(pval_mat) <- gene_names
+
+head(pval_mat)
+x <- pval_mat %>% replace(is.na(.), 0)
+```
+
+```{r}
+library(gplots)
+library(ComplexHeatmap)
+
+png("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/Heatmap_age.png")
+Heatmap(x,
+        show_row_names = FALSE,   # hide long row labels
+        cluster_columns = TRUE,
+        cluster_rows = TRUE,
+        use_raster = TRUE,        # renders faster
+        name = "ρ (rho)")
+dev.off()
+```
+
+FDR p values for all the distensibility associated genes those have crossed threshold and only a few celltypes had those
+```{r}
+names(filtered_genes_vsmc)[10] <- "VSMC-I"
+names(filtered_genes_vsmcII)[10] <- "VSMC-II"
+names(filtered_genes_fibroblastI)[10] <- "Fibroblast-I"
+names(filtered_genes_lymphocyte)[10] <- "Lymphocyte"
+names(filtered_genes_mesothelial)[10] <- "Mesothelial"
+names(filtered_genes_Pericyte)[10] <- "Pericyte"
+
+
+f_genes_vsmc <- filtered_genes_vsmc[, c(1, 10)]
+f_genes_vsmcII <- filtered_genes_vsmcII[, c(1, 10)]
+f_genes_fibroblastI <- filtered_genes_fibroblastI[, c(1, 10)]
+f_genes_lymphocyte <- filtered_genes_lymphocyte[, c(1, 10)]
+f_genes_mesothelial <- filtered_genes_mesothelial[, c(1, 10)]
+f_genes_Pericyte <- filtered_genes_Pericyte[, c(1, 10)]
+
+fdr_list <- list(f_genes_vsmc, f_genes_vsmcII, f_genes_fibroblastI, f_genes_lymphocyte, f_genes_mesothelial, f_genes_Pericyte)
+
+fdr_list_genes <- reshape::merge_recurse(fdr_list)
+fdr_list_genes
+```
+
+##heatmap to show the fdr p values 
+```{r}
+subset <- fdr_list_genes[fdr_list_genes$Variable %in% c("ULK4", "TRAK1", "SVIL", "PLCE1", "CDH13", "SMG6", "SRR", "TSR1", "HAS2", "ELL2")]
+str(subset)
+
+# Convert to matrix
+pval_mat <- as.matrix(subset)
+
+# set gene names as rownames using Variable$gene
+rownames(pval_mat) <- subset$Variable
+
+##remove column1 from matrix
+pval_mat <- pval_mat[, -1]
+pval_mat
+
+str(pval_mat)
+
+# Save the rownames first
+gene_names <- rownames(pval_mat)
+
+# Convert the matrix values to numeric safely
+pval_mat <- apply(pval_mat, 2, function(x) as.numeric(as.character(x)))
+pval_mat <- as.matrix(pval_mat)
+
+# Restore the rownames
+rownames(pval_mat) <- gene_names
+
+# Avoid zeros for log10
+pval_mat[pval_mat == 0] <- .Machine$double.xmin
+log_pval_mat <- -log10(pval_mat)
+
+# Cap maximum log value
+max_val <- 10
+log_pval_mat[log_pval_mat > max_val] <- max_val
+
+# Create color function
+#col_fun <- circlize::colorRamp2(c(0, max_val/2, max_val), c("white", "pink", "red"))
+
+# Draw the heatmap with gene names shown
+##need to include dendograms
+
+Heatmap(log_pval_mat,
+        name = "-log10 p",
+      #  col = col_fun,
+        cluster_rows = FALSE,
+        cluster_columns = FALSE,
+        row_names_side = "left",
+        row_names_gp = gpar(fontsize = 10),
+        na_col = "grey90")
+
+##ggplot corrplot 
+```
+
+correlation plot with just extracted distensibility associated genes
+```{r}
+dist_sp_genes <- r_sp_list_genes %>% 
+  dplyr::filter(Gene %in% c("ELN", "PRDM6", "SMG6", "LIMK1", "EIF1B", "ELL2", "PLCE1", "CDH13", "FBXO32", "ARSK", "RHOBTB3", "SRR", "TSR1", "ENTPD3", "ULK4", "HAS2", "ZNF621", "GLRX", "PCSK1", "RFESD", "GPR150", "TRAK1", "SVIL", "TTC37"))
+
+dist_sp_genes
+
+rownames(dist_sp_genes) <- dist_sp_genes$Gene
+dist_sp_genes <- dist_sp_genes[, -1]
+dist_sp_genes <- as.matrix(dist_sp_genes)
+dist_sp_genes
+
+dist_sp_genes[is.na(dist_sp_genes)] <- 0
+
+Heatmap(dist_sp_genes, 
+        name = "r")
+```
+ggplots for the above mentioned genes
+```{r}
+library(ggplot2)
+#ULK4 in VSMC-I, VSMC-II
+a <- ggplot() +
+ # geom_jitter(data = vsmc_merge_clean, aes(x = age, y = ULK4), color = "skyblue", alpha = 0.6) +
+#  geom_jitter(data = vsmcII_merge_clean, aes(x = age, y = ULK4), color = "orange", alpha = 0.6) +
+  geom_smooth(data = vsmc_merge_clean, aes(x = age, y = ULK4), method = "lm", color = "skyblue", se = FALSE) +
+  geom_smooth(data = vsmcII_merge_clean, aes(x = age, y = ULK4), method = "lm", color = "orange", se = FALSE) +
+  annotate("text", label = "Skyblue = VSMC-I\n Orange = VSMC-II\n", hjust = 0) +
+  scale_x_continuous(limits = c(20, NA)) +  
+  theme_minimal()
+
+#TRAK1 in VSMC-I, VSMC-II, Fibroblast-I
+b <- ggplot() +
+#  geom_jitter(data = vsmc_merge_clean, aes(x = age, y = TRAK1), color = "skyblue", alpha = 0.6) +
+ # geom_jitter(data = vsmcII_merge_clean, aes(x = age, y = TRAK1), color = "orange", alpha = 0.6) +
+ # geom_jitter(data = fibroblastI_merge_clean, aes(x = age, y = TRAK1), color = "lightgreen", alpha = 0.6) +
+  geom_smooth(data = vsmc_merge_clean, aes(x = age, y = TRAK1), method = "lm", color = "skyblue", se = FALSE) +
+  geom_smooth(data = vsmcII_merge_clean, aes(x = age, y = TRAK1), method = "lm", color = "orange", se = FALSE) +
+  geom_smooth(data = fibroblastI_merge_clean, aes(x = age, y = TRAK1), method = "lm", color = "lightgreen", se = FALSE) +
+  annotate("text", label = "Skyblue = VSMC-I\n Orange = Pericyte\n", hjust = 0) +
+  scale_x_continuous(limits = c(20, NA)) +  
+  theme_minimal()
+
+#SVIL in VSMC-I, Pericyte
+c <- ggplot() +
+  #geom_jitter(data = vsmc_merge_clean, aes(x = age, y = SVIL), color = "skyblue", alpha = 0.6) +
+#  geom_jitter(data = Pericyte_merge_clean, aes(x = age, y = SVIL), color = "orange", alpha = 0.6) +
+  geom_smooth(data = vsmc_merge_clean, aes(x = age, y = SVIL), method = "lm", color = "skyblue", se = FALSE) +
+  geom_smooth(data = Pericyte_merge_clean, aes(x = age, y = SVIL), method = "lm", color = "orange", se = FALSE) +
+  annotate("text", label = "Skyblue = VSMC-I\n Orange = Pericyte\n", hjust = 0) +
+  scale_x_continuous(limits = c(20, NA)) +  
+  theme_minimal()
+
+#PLCE1 in VSMC-I, VSMC-II
+d <- ggplot() +
+ # geom_jitter(data = vsmc_merge_clean, aes(x = age, y = PLCE1), color = "skyblue", alpha = 0.6) +
+#  geom_jitter(data = vsmcII_merge_clean, aes(x = age, y = PLCE1), color = "orange", alpha = 0.6) +
+  geom_smooth(data = vsmc_merge_clean, aes(x = age, y = PLCE1), method = "lm", color = "skyblue", se = FALSE) +
+  geom_smooth(data = vsmcII_merge_clean, aes(x = age, y = PLCE1), method = "lm", color = "orange", se = FALSE) +
+  annotate("text", label = "Skyblue = VSMC-I\n Orange = VSMC-II\n", hjust = 0) +
+  scale_x_continuous(limits = c(20, NA)) +  
+  theme_minimal()
+
+#CDH13 in VSMC-I
+e <- ggplot(vsmc_merge_clean, aes(x= age, y = CDH13)) +
+ # geom_jitter(color = "skyblue") + 
+ # geom_boxplot() +
+  geom_smooth(method =lm, color = "skyblue") +
+  scale_x_continuous(limits = c(20, NA)) +  
+  theme_minimal()
+
+#SMG6 in VSMC-I, VSMC-II, Fibroblast-I, Pericyte
+f <- ggplot() +
+#  geom_jitter(data = vsmc_merge_clean, aes(x = age, y = SMG6), color = "skyblue", alpha = 0.6) +
+ # geom_jitter(data = vsmcII_merge_clean, aes(x = age, y = SMG6), color = "orange", alpha = 0.6) +
+#  geom_jitter(data = fibroblastI_merge_clean, aes(x = age, y = SMG6), color = "lightgreen", alpha = 0.6) +
+#  geom_jitter(data = Pericyte_merge_clean, aes(x = age, y = SMG6), color = "purple", alpha = 0.6) +
+  geom_smooth(data = vsmc_merge_clean, aes(x = age, y = SMG6), method = "lm", color = "skyblue", se = FALSE) +
+  geom_smooth(data = vsmcII_merge_clean, aes(x = age, y = SMG6), method = "lm", color = "orange", se = FALSE) +
+  geom_smooth(data = fibroblastI_merge_clean, aes(x = age, y = SMG6), method = "lm", color = "lightgreen", se = FALSE) +
+  geom_smooth(data = Pericyte_merge_clean, aes(x = age, y = SMG6), method = "lm", color = "purple", se = FALSE) +
+  annotate("text", label = "Skyblue = VSMC-I\n Orange = VSMC-II\n", hjust = 0) +
+  scale_x_continuous(limits = c(20, NA)) +  
+  theme_minimal()
+
+
+#SRR in VSMC-I, VSMC-II, Fibroblast-I
+g <- ggplot() +
+ # geom_jitter(data = vsmc_merge_clean, aes(x = age, y = SRR), color = "skyblue", alpha = 0.6) +
+#  geom_jitter(data = vsmcII_merge_clean, aes(x = age, y = SRR), color = "orange", alpha = 0.6) +
+ # geom_jitter(data = fibroblastI_merge_clean, aes(x = age, y = SRR), color = "lightgreen", alpha = 0.6) +
+  geom_smooth(data = vsmc_merge_clean, aes(x = age, y = SRR), method = "lm", color = "skyblue", se = FALSE) +
+  geom_smooth(data = vsmcII_merge_clean, aes(x = age, y = SRR), method = "lm", color = "orange", se = FALSE) +
+  geom_smooth(data = fibroblastI_merge_clean, aes(x = age, y = SRR), method = "lm", color = "lightgreen", se = FALSE) +
+  annotate("text", label = "Skyblue = Lymphocyte\n Red = Mesothelial\n", hjust = 0) +
+  scale_x_continuous(limits = c(20, NA)) +  
+  theme_minimal()
+
+#TSR1 in VSMC-I, VSMC-II, Mesothelial, Pericyte
+h <- ggplot() +
+ # geom_jitter(data = vsmc_merge_clean, aes(x = age, y = TSR1), color = "skyblue", alpha = 0.6) +
+#  geom_jitter(data = vsmcII_merge_clean, aes(x = age, y = TSR1), color = "orange", alpha = 0.6) +
+#  geom_jitter(data = mesothelial_merge_clean, aes(x = age, y = TSR1), color = "lightgreen", alpha = 0.6) +
+#  geom_jitter(data = Pericyte_merge_clean, aes(x = age, y = TSR1), color = "purple", alpha = 0.6) +
+  geom_smooth(data = vsmc_merge_clean, aes(x = age, y = TSR1), method = "lm", color = "skyblue", se = FALSE) +
+  geom_smooth(data = vsmcII_merge_clean, aes(x = age, y = TSR1), method = "lm", color = "orange", se = FALSE) +
+  geom_smooth(data = mesothelial_merge_clean, aes(x = age, y = TSR1), method = "lm", color = "lightgreen", se = FALSE) +
+  geom_smooth(data = Pericyte_merge_clean, aes(x = age, y = TSR1), method = "lm", color = "purple", se = FALSE) +
+  annotate("text",label = "Skyblue = Lymphocyte\n Red = Mesothelial\n", hjust = 0) +
+  scale_x_continuous(limits = c(20, NA)) +  
+  theme_minimal()
+
+#HAS2 in Fibroblast-I
+i <- ggplot(fibroblastI_merge_clean, aes(x= age, y = HAS2)) +
+ # geom_jitter(color ="skyblue") + 
+  geom_smooth(method =lm, color="skyblue") +
+  scale_x_continuous(limits = c(20, NA)) +  
+  theme_minimal()
+
+#ELL2 in Lymphocyte, Mesothelial
+j <- ggplot() +
+#  geom_jitter(data = lymphocyte_merge_clean, aes(x = age, y = ELL2), color = "skyblue", alpha = 0.6) +
+#  geom_jitter(data = mesothelial_merge_clean, aes(x = age, y = ELL2), color = "orange", alpha = 0.6) +
+  # Regression lines
+  geom_smooth(data = lymphocyte_merge_clean, aes(x = age, y = ELL2), method = "lm", color = "skyblue", se = FALSE) +
+  geom_smooth(data = mesothelial_merge_clean, aes(x = age, y = ELL2), method = "lm", color = "orange", se = FALSE) +
+  # Annotation
+  annotate("text", label = "Blue = L\nRed = M", hjust = 0) +
+  scale_x_continuous(limits = c(20, NA)) +   ##remove gap in age
+  theme_minimal()
+
+library(cowplot)
+#plot_grid(a,b,c,d,e,f,g,h,i,j, nrow=2, ncol = 5)
+```
+
+```{r}
+#merging means of all --- this is for ssGSEA :)
+##fibroblastII, lym_endothelial, endothelialI doesnt contain any gene of interest, so removing it from below
+df_list <- list(vsmc_genes, vsmcII_genes, fibroblastI_genes, lymphocyte_genes, macrophage_genes, mesothelial_genes, Pericyte_genes, endothelialII_genes)
+
+data_age_dist_genes <- reshape::merge_recurse(df_list)
+colnames(data_age_dist_genes)[1] <- "gene_name"
+data_age_dist_genes
+#write.table(data_age_dist_genes, "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_gene_expressions_dist_age.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+#data
+```
+
+```{r}
+# Install and load UpSetR if you haven't
+#install.packages("UpSetR")
+library(UpSetR)
+
+# Define gene sets
+gene_sets_lm <- list(
+  "VSMC-I" = significant_genes_vsmcI$Variable,
+  "VSMC-II" = significant_genes_vsmcII$Variable,
+  "Pericyte" = significant_genes_Pericyte$Variable,
+  "Fibroblast-I" = significant_genes_fibroblastI$Variable,
+  "Fibroblast-II" = significant_genes_fibroblastII$Variable,
+  "Endothelial-I" = significant_genes_endothelialI$Variable,
+  "Endothelial-II" = significant_genes_endothelialII$Variable,
+  "Lymphatic Endothelial" = significant_genes_lym_endothelial$Variable,
+  "Lymphocyte" = significant_genes_lymphocyte$Variable,
+  "Macrophage" = significant_genes_macrophage$Variable,
+  "Mesothelial" = significant_genes_mesothelial$Variable,
+  "Neuronal" = significant_genes_neuronal$Variable
+)
+
+input_df_lm <- fromList(gene_sets_lm)
+#dim(input_df)
+
+#png("upset_plot.png", width = 1800, height = 800, res = 150)
+
+# Draw the UpSet plot (do NOT assign to `p`)
+upset(input_df_lm, nsets = 12, order.by = "freq")
+
+# Close the device
+#dev.off()
+```
+common genes in between sp and lm
+```{r}
+df <- data.frame(
+  Set = rep(names(gene_sets_lm), 2),
+  Count = c(lengths(gene_sets_lm), lengths(gene_sets_sp)),
+  Method = rep(c("linear regression", "spearman"), each = length(gene_sets_lm))
+)
+
+ggplot(df, aes(x = Set, y = Count, fill = Method)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "", y = "Gene Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+ # geom_text(aes(label = Count), position = position_dodge(0.02), vjust = -0.1)
+
+```
+```{r}
+common_counts <- sapply(names(gene_sets_lm), function(set_name) {
+  intersect_genes <- intersect(gene_sets_lm[[set_name]], gene_sets_sp[[set_name]])
+  length(intersect_genes)
+})
+
+
+df_common <- data.frame(
+  Set = names(common_counts),
+  Count = as.integer(common_counts)
+)
+
+library(ggplot2)
+
+ggplot(df_common, aes(x = Set, y = Count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Number of Overlapping Genes per Set", y = "Common Gene Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+```{r}
+all_sets <- intersect(names(gene_sets_lm), names(gene_sets_sp))
+
+df_bar <- data.frame(
+  Set = rep(all_sets, each = 3),
+  Method = rep(c("lm", "sp", "Common"), times = length(all_sets)),
+  Count = unlist(lapply(all_sets, function(set) {
+    genes1 <- gene_sets_lm[[set]]
+    genes2 <- gene_sets_sp[[set]]
+    c(
+      length(genes1),                      # lm
+      length(genes2),                      # sp
+      length(intersect(genes1, genes2))    # Common
+    )
+  }))
+)
+
+
+ggplot2::ggplot(df_bar, aes(x = Set, y = Count, fill = Method)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8)) +
+  scale_fill_manual(values = c("lm" = "steelblue", 
+                               "sp" = "skyblue", 
+                               "Common" = "lightcoral")) +
+  theme_minimal() +
+  xlab
+  labs(title = "",
+       y = "Number of Genes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
