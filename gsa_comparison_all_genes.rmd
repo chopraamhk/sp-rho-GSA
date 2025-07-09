@@ -1,1 +1,490 @@
+---
+title: "gsea_spearmans"
+author: "Mehak Chopra"
+date: "2025-06-18"
+output: html_document
+---
+In the following, the analysis has been done using C2.GO only. 
+GSEA analysis --- uploading all the genes with rho corr (estimates) , standard error and p values 
+```{r}
+library(dplyr)
+library(readr)
+library(purrr)
 
+file_paths <- c("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/vsmc_se.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/vsmcii_se.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/fibroblastI_se.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/fibroblastII_se.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/Pericyte_se.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/endothelialI_se.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/endothelialII_se.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/lym_endothelial_se.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/lymphocyte_se.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/macrophage_se.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/mesothelial_se.csv",
+               "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/all_genes/neuronal_se.csv")
+
+celltype_names <- c("VSMCI", "VSMCII", "FibroblastI", "FibroblastII", "Pericyte", "EndothelialI", "EndothelialII", "Lymphatic_Endothelial", "Lymphocyte", "Macrophage", "Mesothelial", "Neuronal")
+
+if (length(file_paths) != length(celltype_names)) {
+  stop("The number of file paths does not match the number of celltype names.")
+}
+
+# 2. INITIALIZE YOUR LISTS
+list_of_Estimates <- list()
+list_of_ses <- list()
+list_of_pvals <- list()
+
+# 3. RUN THE LOOP
+for (i in 1:length(file_paths)) {
+  path <- file_paths[i]
+  
+  # --- KEY CHANGE: Get the custom name for this iteration ---
+  current_celltype_name <- celltype_names[i]
+  
+  # Read the current file
+  current_data <- readr::read_csv(path, show_col_types = FALSE) 
+  
+  # Process and store the Estimate data using the custom name
+  list_of_Estimates[[i]] <- current_data %>%
+    dplyr::select(Gene, Estimate) %>%
+    # Use your custom name to create the column title
+    dplyr::rename(!!paste0("Estimate_", current_celltype_name) := Estimate)
+
+  # Process and store the standard error data
+  list_of_ses[[i]] <- current_data %>%
+    dplyr::select(Gene, SE) %>%
+    # Use your custom name here as well
+    dplyr::rename(!!paste0("se_", current_celltype_name) := SE)
+  
+  #Process and store the p values
+  list_of_pvals[[i]] <- current_data %>%
+    dplyr::select(Gene, pval) %>%
+    dplyr::rename(!!paste0("pval_", current_celltype_name) := pval)
+}
+
+Estimate_df <- purrr::reduce(list_of_Estimates, full_join, by = "Gene")
+se_df <- purrr::reduce(list_of_ses, full_join, by = "Gene")
+pval_df <- purrr::reduce(list_of_pvals, full_join, by = "Gene") 
+
+Estimate_final_df <- as.data.frame(Estimate_df)
+
+# Now that it's a real data.frame, set the rownames
+rownames(Estimate_final_df) <- Estimate_final_df$Gene
+
+# Remove the now-redundant 'Gene' column
+Estimate_final_df$Gene <- NULL
+
+# Do the exact same process for the 'lfcSE' data
+se_final_df <- as.data.frame(se_df)
+rownames(se_final_df) <- se_final_df$Gene
+se_final_df$Gene <- NULL
+
+#pvalues
+pval_final_df <- as.data.frame(pval_df)  # <-- New
+rownames(pval_final_df) <- pval_final_df$Gene
+pval_final_df$Gene <- NULL
+
+# Step 4: Create the final list object 'resd'
+resd_sp <- list(Estimate = Estimate_final_df, se = se_final_df, pval = pval_final_df)
+```
+
+In this, we will run the analysis using Hallmark genes, C2.CP (Canonical pathways), C5.GO (gene ontology), C5.HPO.We'll just change the genesets below if we are interested in any one. Now, as we are taking all the genes, there might be a small problem. This will give high ranking to positive correlated genes but will not consider negative correlations as it'll not consider them in analysis. That's the reason, performing analysis using positives and negatives separate is advisable.
+
+#c2--canonical pathways
+msigdb_df <- read.gmt("c2.cp.v2025.1.Hs.symbols.gmt")
+#msigdb_sets <- split(msigdb_df$gene, msigdb_df$term)
+
+#hallmark
+#msigdb_h_df <- read.gmt("h.all.v2025.1.Hs.symbols.gmt")
+#msigdb_h_sets <- split(msigdb_h_df$gene, msigdb_h_df$term)
+
+#C8
+#msigdb_c8_df <- read.gmt("c8.all.v2025.1.Hs.symbols.gmt")
+#msigdb_c8_sets <- split(msigdb_c8_df$gene, msigdb_c8_df$term)
+
+all the genes - GSEA 
+```{r}
+library(fgsea)
+library(clusterProfiler)
+
+msigdb_c5_df <- read.gmt("c5.go.v2025.1.Hs.symbols.gmt")
+msigdb_c5_sets <- split(msigdb_c5_df$gene, msigdb_c5_df$term)
+
+gene_stats_list <- list(
+  VSMCI = resd_sp$Estimate$Estimate_VSMCI,
+  VSMCII = resd_sp$Estimate$Estimate_VSMCII,
+  FibroblastI = resd_sp$Estimate$Estimate_FibroblastI,
+  FibroblastII = resd_sp$Estimate$Estimate_FibroblastII,
+  Lymphatic_Endothelial = resd_sp$Estimate$Estimate_Lymphatic_Endothelial,
+  Lymphocyte = resd_sp$Estimate$Estimate_Lymphocyte,
+  Macrophage = resd_sp$Estimate$Estimate_Macrophage,
+  Mesothelial = resd_sp$Estimate$Estimate_Mesothelial,
+  Neuronal = resd_sp$Estimate$Estimate_Neuronal,
+  Pericyte = resd_sp$Estimate$Estimate_Pericyte,
+  EndothelialI = resd_sp$Estimate$Estimate_EndothelialI,
+  EndothelialII = resd_sp$Estimate$Estimate_EndothelialII
+                )
+
+# Pre-process each vector in the list.
+preproc_stats_list <- lapply(gene_stats_list, function(gene_stats_vector) {
+  names(gene_stats_vector) <- rownames(resd_sp$Estimate)
+  gene_stats_vector <- na.omit(gene_stats_vector)
+  gene_stats_vector <- sort(gene_stats_vector, decreasing = TRUE)
+  return(gene_stats_vector)
+})
+
+
+# --- Step 2: Run FGSEA with a Seed for Reproducibility ---
+set.seed(42)
+fgsea_results_list <- lapply(preproc_stats_list, function(ranked_genes) {
+  fgsea(
+    pathways = msigdb_c5_sets,
+    stats = ranked_genes,
+    minSize = 3,
+    maxSize = 800
+  )
+})
+
+# --- Step 3: Filter for significant pathways ---
+fgsea_sig_list <- lapply(fgsea_results_list, function(res) {
+  res[res$padj < 0.05 & !is.na(res$padj), ]
+})
+```
+
+
+GSA - mremaR  -- all
+```{r}
+library(msigdbr)
+library(clusterProfiler)
+
+msigdb_c5_df <- read.gmt("c5.go.v2025.1.Hs.symbols.gmt")
+msigdb_c5_sets <- split(msigdb_c5_df$gene, msigdb_c5_df$term)
+
+full.gsa <- lapply(1:12, function(ct) {
+  data <- data.frame(
+    genes = rownames(resd_sp$Estimate),
+    lfc = resd_sp$Estimate[, ct],
+    lfcSE = resd_sp$se[, ct]
+  )
+
+  mremaR::REtest(data, log2(2), msigdb_c5_sets)
+})
+
+names(full.gsa) <- colnames(resd_sp$Estimate)[c(1:12)]
+saveRDS(full.gsa, file = "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/mremaR_results/c5_go_all_genes_non_p.RDS")
+
+#mremaR::REshine()
+#full.gsa
+```
+
+If the results are already saved in RDS file
+```{r}
+mremaR_go <- readRDS("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/mremaR_results/c5_go_all_genes_non_p.RDS")
+
+VSMCI <- subset(mremaR_go$Estimate_VSMCI$results, P.value<0.05)
+VSMCII <- subset(mremaR_go$Estimate_VSMCII$results, P.value<0.05)
+fibroblastI <- subset(mremaR_go$Estimate_FibroblastI$results, P.value<0.05)
+fibroblastII <- subset(mremaR_go$Estimate_FibroblastII$results, P.value<0.05)
+Pericyte <- subset(mremaR_go$Estimate_Pericyte$results, P.value<0.05)
+EndothelialI <- subset(mremaR_go$Estimate_EndothelialI$results, P.value<0.05)
+EndothelialII <- subset(mremaR_go$Estimate_EndothelialII$results, P.value<0.05)
+Lymphocyte <- subset(mremaR_go$Estimate_Lymphocyte$results, P.value<0.05)
+Macrophage <- subset(mremaR_go$Estimate_Macrophage$results, P.value<0.05)
+Mesothelial <- subset(mremaR_go$Estimate_VSMCI$results, P.value<0.05)
+Lymphatic_Endothelial <- subset(mremaR_go$Estimate_VSMCI$results, P.value<0.05)
+Neuronal <- subset(mremaR_go$Estimate_VSMCI$results, P.value<0.05)
+
+all_mremaR_go <- list(VSMCI, VSMCII, fibroblastI, fibroblastII, Pericyte, EndothelialI, EndothelialII, Lymphocyte, Macrophage, Mesothelial, Lymphatic_Endothelial, Neuronal)
+
+names(all_mremaR_go) <- c("VSMCI", "VSMCII", "Fibroblast-I", "Fibroblast-II", "Pericyte", "Endothelial-I", "Endothelial-II", "Lymphocyte", "Macrophage", "Mesothelial", "Lymphatic Endothelial", "Neuronal")
+```
+
+just the significant genes -- fix the names so that it doesnt overlap anywhere
+```{r}
+file_paths <- c("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/vsmc_se_significant.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/vsmcii_se_significant.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/fibroblastI_se_significant.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/fibroblastII_se_significant.csv",
+              "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/Pericyte_se_significant.csv",
+              "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/endothelialI_se_significant.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/endothelialII_se_significant.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/lym_endothelial_se_significant.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/lymphocyte_se_significant.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/macrophage_se_significant.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/mesothelial_se_significant.csv",
+            "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/neuronal_se_significant.csv")
+
+celltype_names <- c("VSMCI", "VSMCII", "FibroblastI", "FibroblastII", "Pericyte", "EndothelialI", "EndothelialII", "Lymphatic_Endothelial", "Lymphocyte", "Macrophage", "Mesothelial", "Neuronal")
+
+if (length(file_paths) != length(celltype_names)) {
+  stop("The number of file paths does not match the number of celltype names.")
+}
+
+# 2. INITIALIZE YOUR LISTS
+list_of_Estimates <- list()
+list_of_ses <- list()
+list_of_pvals <- list()
+
+# 3. RUN THE LOOP
+for (i in 1:length(file_paths)) {
+  path <- file_paths[i]
+  
+  # --- KEY CHANGE: Get the custom name for this iteration ---
+  current_celltype_name <- celltype_names[i]
+  
+  # Read the current file
+  current_data <- readr::read_csv(path, show_col_types = FALSE) 
+  
+  # Process and store the Estimate data using the custom name
+  list_of_Estimates[[i]] <- current_data %>%
+    dplyr::select(Gene, Estimate) %>%
+    # Use your custom name to create the column title
+    dplyr::rename(!!paste0("Estimate_", current_celltype_name) := Estimate)
+
+  # Process and store the standard error data
+  list_of_ses[[i]] <- current_data %>%
+    dplyr::select(Gene, SE) %>%
+    # Use your custom name here as well
+    dplyr::rename(!!paste0("se_", current_celltype_name) := SE)
+  
+  #Process and store the p values
+  list_of_pvals[[i]] <- current_data %>%
+    dplyr::select(Gene, pval) %>%
+    dplyr::rename(!!paste0("pval_", current_celltype_name) := pval)
+}
+
+Estimate_df <- purrr::reduce(list_of_Estimates, full_join, by = "Gene")
+se_df <- purrr::reduce(list_of_ses, full_join, by = "Gene")
+pval_df <- purrr::reduce(list_of_pvals, full_join, by = "Gene") 
+
+Estimate_final_df <- as.data.frame(Estimate_df)
+
+# Now that it's a real data.frame, set the rownames
+rownames(Estimate_final_df) <- Estimate_final_df$Gene
+
+# Remove the now-redundant 'Gene' column
+Estimate_final_df$Gene <- NULL
+
+# Do the exact same process for the 'lfcSE' data
+se_final_df <- as.data.frame(se_df)
+rownames(se_final_df) <- se_final_df$Gene
+se_final_df$Gene <- NULL
+
+#pvalues
+pval_final_df <- as.data.frame(pval_df)  # <-- New
+rownames(pval_final_df) <- pval_final_df$Gene
+pval_final_df$Gene <- NULL
+
+# Step 4: Create the final list object 'resd'
+resd_sp_sign <- list(Estimate = Estimate_final_df, se = se_final_df, pval = pval_final_df)
+```
+
+ORA - fgsea 
+```{r}
+library(fgsea)
+
+# Load pathways
+pathways_gmt_file <- "c5.go.v2025.1.Hs.symbols.gmt"
+msigdb_c5_sets <- gmtPathways(pathways_gmt_file)
+
+# Define the BACKGROUND gene list from the full results table.
+# This will be the same for all 12 analyses.
+experiment_columns <- colnames(resd_sp$Estimate)
+
+all_ora_results <- lapply(experiment_columns, function(col_name) {
+  
+  message(paste("--- Running ORA for experiment:", col_name, "---"))
+  
+  # A. Define the FOREGROUND genes using your exact logic.
+  foreground_values <- resd_sp_sign$Estimate[[col_name]]
+  names(foreground_values) <- rownames(resd_sp_sign$Estimate)
+  foreground_values <- na.omit(foreground_values)
+  foreground_genes <- names(foreground_values)
+  
+  # B. Define the BACKGROUND genes using your exact logic.
+  background_values <- resd_sp$Estimate[[col_name]]
+  names(background_values) <- rownames(resd_sp$Estimate)
+  background_values <- na.omit(background_values)
+  background_genes <- names(background_values)
+  
+  # Safety check and progress message
+  if (length(foreground_genes) == 0) {
+    message("   No significant (non-NA) genes found for this experiment. Skipping.")
+    return(NULL) # Return NULL so the loop can continue
+  }
+  
+  message(paste("   Found", length(foreground_genes), "foreground genes"))
+  message(paste("   Using a background of", length(background_genes), "genes for this specific experiment."))
+  
+  # C. Run the Over-Representation Analysis
+  foraRes <- fora(
+    genes = foreground_genes,
+    universe = background_genes,
+    pathways = msigdb_c5_sets,
+    minSize = 3,
+    maxSize = 800
+  )
+    foraRes <- foraRes[foraRes$padj < 0.05, ]
+  
+  # E. Add the overlapping genes column for the remaining enriched pathways.
+  if (nrow(foraRes) > 0) {
+    overlapping_genes_list <- sapply(foraRes$pathway, function(pathway_name) {
+      genes_in_pathway <- msigdb_c5_sets[[pathway_name]]
+      overlapping_genes <- intersect(foreground_genes, genes_in_pathway)
+      paste(overlapping_genes, collapse = ", ")
+    })
+    foraRes$foreground_genes_in_pathway <- overlapping_genes_list
+  }
+  
+  # F. Return the final, filtered table for this experiment.
+  return(foraRes)
+})
+
+names(all_ora_results) <- experiment_columns
+```
+
+```{r}
+common_pathways_VSMCI <- unlist(Reduce(intersect, list(fgsea_sig_list$VSMCI$pathway, all_mremaR_go$VSMCI$Gene.Set, all_ora_results$Estimate_VSMCI$pathway)))
+
+common_pathways_VSMCII <- unlist(Reduce(intersect, list(fgsea_sig_list$VSMCII$pathway, all_mremaR_go$VSMCII$Gene.Set, all_ora_results$Estimate_VSMCII$pathway)))
+
+common_pathways_fibroblastI <- unlist(Reduce(intersect, list(fgsea_sig_list$FibroblastI$pathway, all_mremaR_go$`Fibroblast-I`$Gene.Set, all_ora_results$Estimate_FibroblastI$pathway)))
+
+common_pathways_fibroblastII <- unlist(Reduce(intersect, list(fgsea_sig_list$FibroblastII$pathway, all_mremaR_go$`Fibroblast-II`$Gene.Set, all_ora_results$Estimate_FibroblastII$pathway)))
+
+common_pathways_EndothelialI <- unlist(Reduce(intersect, list(fgsea_sig_list$EndothelialI$pathway, all_mremaR_go$`Endothelial-I`$Gene.Set, all_ora_results$Estimate_EndothelialI$pathway)))
+
+common_pathways_EndothelialII <- unlist(Reduce(intersect, list(fgsea_sig_list$EndothelialII$pathway, all_mremaR_go$`Endothelial-II`$Gene.Set, all_ora_results$Estimate_EndothelialII$pathway)))
+
+common_pathways_lymphocyte <- unlist(Reduce(intersect, list(fgsea_sig_list$Lymphocyte$pathway, all_mremaR_go$Lymphocyte$Gene.Set, all_ora_results$Estimate_Lymphocyte$pathway)))
+
+common_pathways_macrophage <- unlist(Reduce(intersect, list(fgsea_sig_list$Macrophage$pathway, all_mremaR_go$Macrophage$Gene.Set, all_ora_results$Estimate_Macrophage$pathway)))
+
+common_pathways_mesothelial <- unlist(Reduce(intersect, list(fgsea_sig_list$Mesothelial$pathway, all_mremaR_go$Mesothelial$Gene.Set, all_ora_results$Estimate_Mesothelial$pathway)))
+
+common_pathways_pericyte <- unlist(Reduce(intersect, list(fgsea_sig_list$Pericyte$pathway, all_mremaR_go$Pericyte$Gene.Set, all_ora_results$Estimate_Pericyte$pathway)))
+
+common_pathways_neuronal <- unlist(Reduce(intersect, list(fgsea_sig_list$Neuronal$pathway, all_mremaR_go$Neuronal$Gene.Set, all_ora_results$Estimate_Neuronal$pathway)))
+
+common_pathways_VSMCI
+common_pathways_VSMCII
+common_pathways_fibroblastI
+common_pathways_fibroblastII
+common_pathways_EndothelialI
+common_pathways_EndothelialII
+common_pathways_lymphocyte
+common_pathways_macrophage
+common_pathways_mesothelial
+common_pathways_pericyte
+common_pathways_neuronal
+
+#extracting fgsea values 
+common_VSMCI <- fgsea_sig_list$VSMCI[fgsea_sig_list$VSMCI$pathway %in% common_pathways_VSMCI, ]
+common_VSMCI$celltype <- "VSMCI"
+```
+
+Because we get only 5 pathways common in VSMCI
+```{r}
+ggplot(common_VSMCI, aes(x = NES, y = reorder(pathway, NES), color = padj)) +
+  geom_point(size = 3) +
+  #geom_density() +
+  scale_color_gradient(low = "blue", high = "red", trans = "reverse", name = "Adj. P-value") +
+  theme_minimal() +
+  labs(
+    title = "GSEA Pathways by NES and Significance in VSMCI",
+    x = "Normalized Enrichment Score (NES)",
+    y = "Pathway"
+  )
+```
+
+common between fGSEA and mremaR 
+```{r}
+# Find common pathways
+common_pathways_VSMCI <- intersect(fgsea_sig_list$VSMCI$pathway, all_mremaR_go$VSMCI$Gene.Set)
+common_VSMCI <- fgsea_sig_list$VSMCI[fgsea_sig_list$VSMCI$pathway %in% common_pathways_VSMCI, ]
+common_VSMCI$celltype <- "VSMCI"
+
+common_pathways_VSMCII <- intersect(fgsea_sig_list$VSMCII$pathway, all_mremaR_go$VSMCII$Gene.Set)
+common_VSMCII <- fgsea_sig_list$VSMCII[fgsea_sig_list$VSMCII$pathway %in% common_pathways_VSMCII, ]
+common_VSMCII$celltype <- "VSMCII"
+
+common_pathways_fibroblastI <- intersect(fgsea_sig_list$FibroblastI$pathway, all_mremaR_go$`Fibroblast-I`$Gene.Set)
+common_fibroblastI <- fgsea_sig_list$FibroblastI[fgsea_sig_list$FibroblastI$pathway %in% common_pathways_fibroblastI, ]
+common_fibroblastI$celltype <- "Fibroblast-I"
+
+common_pathways_fibroblastII <- intersect(fgsea_sig_list$FibroblastII$pathway, all_mremaR_go$`Fibroblast-II`$Gene.Set)
+common_fibroblastII <- fgsea_sig_list$FibroblastII[fgsea_sig_list$FibroblastII$pathway %in% common_pathways_fibroblastII, ]
+common_fibroblastII$celltype <- "Fibroblast-II"
+
+common_pathways_EndothelialI <- intersect(fgsea_sig_list$EndothelialI$pathway, all_mremaR_go$`Endothelial-I`$Gene.Set)
+common_EndothelialI <- fgsea_sig_list$EndothelialI[fgsea_sig_list$EndothelialI$pathway %in% common_pathways_EndothelialI, ]
+common_EndothelialI$celltype <- "Endothelial-I"
+
+common_pathways_EndothelialII <- intersect(fgsea_sig_list$EndothelialII$pathway, all_mremaR_go$`Endothelial-II`$Gene.Set)
+common_EndothelialII <- fgsea_sig_list$EndothelialII[fgsea_sig_list$EndothelialII$pathway %in% common_pathways_EndothelialII, ]
+common_EndothelialII$celltype <- "Endothelial-II"
+
+common_pathways_lymphocyte <- intersect(fgsea_sig_list$Lymphocyte$pathway, all_mremaR_go$Lymphocyte$Gene.Set)
+common_lymphocyte <- fgsea_sig_list$Lymphocyte[fgsea_sig_list$Lymphocyte$pathway %in% common_pathways_lymphocyte, ]
+common_lymphocyte$celltype <- "Lymphocyte"
+
+common_pathways_Macrophage <- intersect(fgsea_sig_list$Macrophage$pathway, all_mremaR_go$Macrophage$Gene.Set)
+common_Macrophage <- fgsea_sig_list$Macrophage[fgsea_sig_list$Macrophage$pathway %in% common_pathways_Macrophage, ]
+common_Macrophage$celltype <- "Macrophage"
+
+common_pathways_Mesothelial <- intersect(fgsea_sig_list$Mesothelial$pathway, all_mremaR_go$Mesothelial$Gene.Set)
+common_Mesothelial <- fgsea_sig_list$Mesothelial[fgsea_sig_list$Mesothelial$pathway %in% common_pathways_Mesothelial, ]
+common_Mesothelial$celltype <- "Mesothelial"
+
+common_pathways_Pericyte <- intersect(fgsea_sig_list$Pericyte$pathway, all_mremaR_go$Pericyte$Gene.Set)
+common_Pericyte <- fgsea_sig_list$Pericyte[fgsea_sig_list$Pericyte$pathway %in% common_pathways_Pericyte, ]
+common_Pericyte$celltype <- "Pericyte"
+
+common_pathways_Neuronal <- intersect(fgsea_sig_list$Neuronal$pathway, all_mremaR_go$Neuronal$Gene.Set)
+common_Neuronal<- fgsea_sig_list$Neuronal[fgsea_sig_list$Neuronal$pathway %in% common_pathways_Neuronal, ]
+common_Neuronal$celltype <- "Neuronal"
+
+all_common <- rbind(common_VSMCI, common_VSMCII, common_fibroblastI, common_fibroblastII, common_EndothelialI, common_EndothelialII, common_lymphocyte, common_Macrophage, common_Mesothelial, common_Pericyte, common_Neuronal)
+
+library(ggplot2)
+gg <- ggplot(all_common, 
+       aes(x = celltype, y = pathway, colour = padj, size = size)) +
+      geom_point() +
+      theme_minimal() +
+     theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 0.5))
+gg
+#ggsave("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/genesets_common_fgsea_mremaR.png", gg, height = 10, width = 15, dpi = 300)
+```
+
+```{r}
+library(ggtext)
+
+celltype_cols <- c(VSMCI="#333333", VSMCII="#B2EF9B", "Fibroblast-I"="#3A7219", Lymphocyte="#1B360C")
+
+gradient_cols <- colorRampPalette(c('#190c3E', '#87216B', '#E44C30', '#F7D340'))
+
+y_labs <- paste0("<span style='color:", celltype_cols, "'>", names(celltype_cols), "</span>")
+#y_labs <- paste0(names(celltype_cols))
+#head(y_labs)
+
+xxx<- ggplot(all_common, 
+       aes(y = celltype, x = pathway, colour = padj, size = size)) +
+      geom_point() +
+    #  scale_x_discrete(limits = gene_order) +
+  scale_y_discrete(limits = rev(names(celltype_cols)), labels = rev(y_labs)) + coord_flip() +
+  scale_colour_gradientn(colours = gradient_cols(100)) +
+  scale_size(range = c(0.5,4)) +
+ # facet_wrap(~celltype) +
+#  scale_size(labels = scales::percent, range = c(0.5, 4)) +
+  labs(y = "celltypes", x = "pathways", colour = 'P adj', size = 'number of genes') +
+  guides(colour = guide_colourbar(order = 1, barlength = unit(6, 'lines')), size = guide_legend(order = 2)) +
+  theme_linedraw(base_size = 14) +
+  theme(axis.text.x = element_markdown(angle = 90, hjust = 1, vjust = 0.5),
+        axis.text.y = element_markdown(face = 'bold'),
+        legend.title = element_text(size = 12, vjust = 0.5),
+        legend.box.margin = margin(t = 45))
+xxx
+
+#ggsave("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/genesets_common_fgsea_mremaR_colour.png", xxx, height = 15, width = 20, dpi = 300)
+```
