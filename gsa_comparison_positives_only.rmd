@@ -347,7 +347,7 @@ saveRDS(full.gsa, file = "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconv
 
 If the results are already saved in RDS file
 ```{r}
-mremaR_go <- readRDS("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/mremaR_results/h_all_genes_non_p.RDS")
+mremaR_go <- readRDS("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/mremaR_results/h_positives_non_p.RDS")
 
 VSMCI <- subset(mremaR_go$Estimate_VSMCI$results, P.value<0.05)
 VSMCII <- subset(mremaR_go$Estimate_VSMCII$results, P.value<0.05)
