@@ -1,11 +1,10 @@
 ---
-title: "gsea_spearmans_negatives"
+title: "gsea_spearmans_positives"
 author: "Mehak Chopra"
 date: "2025-06-18"
 output: html_document
 ---
 
-Leave Lymphatic Endothelial and Neuronal 
 GSEA analysis --- uploading all the genes with rho corr (estimates) , standard error and p values 
 all the genes
 ```{r}
@@ -86,26 +85,26 @@ pval_final_df$Gene <- NULL
 resd_sp <- list(Estimate = Estimate_final_df, se = se_final_df, pval = pval_final_df)
 ```
 
-negatives only 
+positives only 
 ```{r}
 library(dplyr)
 library(readr)
 library(purrr)
 
-file_paths_negatives <- c("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_only/vsmc_se_negative.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_only/vsmcii_se_negative.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_only/fibroblastI_se_negative.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_only/fibroblastII_se_negative.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_only/Pericyte_se_negative.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_only/endothelialI_se_negative.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_only/endothelialII_se_negative.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_only/lymphocyte_se_negative.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_only/macrophage_se_negative.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_only/mesothelial_se_negative.csv")
+file_paths_positives <- c("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_only/vsmc_se_positive.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_only/vsmcii_se_positive.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_only/fibroblastI_se_positive.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_only/fibroblastII_se_positive.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_only/Pericyte_se_positive.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_only/endothelialI_se_positive.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_only/endothelialII_se_positive.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_only/lymphocyte_se_positive.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_only/macrophage_se_positive.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_only/mesothelial_se_positive.csv")
 
 celltype_names <- c("VSMCI", "VSMCII", "FibroblastI", "FibroblastII", "Pericyte", "EndothelialI", "EndothelialII", "Lymphocyte", "Macrophage", "Mesothelial")
 
-if (length(file_paths_negatives) != length(celltype_names)) {
+if (length(file_paths_positives) != length(celltype_names)) {
   stop("The number of file paths does not match the number of celltype names.")
 }
 
@@ -115,8 +114,8 @@ list_of_ses <- list()
 list_of_pvals <- list()
 
 # 3. RUN THE LOOP
-for (i in 1:length(file_paths_negatives)) {
-  path <- file_paths_negatives[i]
+for (i in 1:length(file_paths_positives)) {
+  path <- file_paths_positives[i]
   
   # --- KEY CHANGE: Get the custom name for this iteration ---
   current_celltype_name <- celltype_names[i]
@@ -165,32 +164,30 @@ rownames(pval_final_df) <- pval_final_df$Gene
 pval_final_df$Gene <- NULL
 
 # Step 4: Create the final list object 'resd'
-resd_sp_negatives <- list(Estimate = Estimate_final_df, se = se_final_df, pval = pval_final_df)
-
-#saveRDS(resd_sp_negatives, file = "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/resd_sp_negatives.RDS")
+resd_sp_positives <- list(Estimate = Estimate_final_df, se = se_final_df, pval = pval_final_df)
 ```
 
 
-negatives significant only 
+positives significant only 
 ```{r}
 library(dplyr)
 library(readr)
 library(purrr)
 
-file_paths_negatives_sign <- c("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_sign_only/vsmc_se_negative_sign.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_sign_only/vsmcii_se_negative_sign.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_sign_only/fibroblastI_se_negative_sign.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_sign_only/fibroblastII_se_negative_sign.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_sign_only/Pericyte_se_negative_sign.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_sign_only/endothelialI_se_negative_sign.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_sign_only/endothelialII_se_negative_sign.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_sign_only/lymphocyte_se_negative_sign.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_sign_only/macrophage_se_negative_sign.csv",
-                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/negative_corr_sign_only/mesothelial_se_negative_sign.csv")
+file_paths_positives_sign <- c("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_sign_only/vsmc_se_positive_sign.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_sign_only/vsmcii_se_positive_sign.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_sign_only/fibroblastI_se_positive_sign.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_sign_only/fibroblastII_se_positive_sign.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_sign_only/Pericyte_se_positive_sign.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_sign_only/endothelialI_se_positive_sign.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_sign_only/endothelialII_se_positive_sign.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_sign_only/lymphocyte_se_positive_sign.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_sign_only/macrophage_se_positive_sign.csv",
+                "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/positive_corr_sign_only/mesothelial_se_positive_sign.csv")
 
 celltype_names <- c("VSMCI", "VSMCII", "FibroblastI", "FibroblastII", "Pericyte", "EndothelialI", "EndothelialII", "Lymphocyte", "Macrophage", "Mesothelial")
 
-if (length(file_paths_negatives_sign) != length(celltype_names)) {
+if (length(file_paths_positives_sign) != length(celltype_names)) {
   stop("The number of file paths does not match the number of celltype names.")
 }
 
@@ -200,8 +197,8 @@ list_of_ses <- list()
 list_of_pvals <- list()
 
 # 3. RUN THE LOOP
-for (i in 1:length(file_paths_negatives_sign)) {
-  path <- file_paths_negatives_sign[i]
+for (i in 1:length(file_paths_positives_sign)) {
+  path <- file_paths_positives_sign[i]
   
   # --- KEY CHANGE: Get the custom name for this iteration ---
   current_celltype_name <- celltype_names[i]
@@ -250,7 +247,7 @@ rownames(pval_final_df) <- pval_final_df$Gene
 pval_final_df$Gene <- NULL
 
 # Step 4: Create the final list object 'resd'
-resd_sp_negatives_sign <- list(Estimate = Estimate_final_df, se = se_final_df, pval = pval_final_df)
+resd_sp_positives_sign <- list(Estimate = Estimate_final_df, se = se_final_df, pval = pval_final_df)
 ```
 
 
@@ -273,27 +270,27 @@ all the genes - GSEA
 library(fgsea)
 library(clusterProfiler)
 
-msigdb_c5_df <- read.gmt("c2.cp.v2025.1.Hs.symbols.gmt")
+msigdb_c5_df <- read.gmt("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/c5.go.v2025.1.Hs.symbols.gmt")
 msigdb_c5_sets <- split(msigdb_c5_df$gene, msigdb_c5_df$term)
 
 gene_stats_list <- list(
-  VSMCI = resd_sp_negatives$Estimate$Estimate_VSMCI,
-  VSMCII = resd_sp_negatives$Estimate$Estimate_VSMCII,
-  FibroblastI = resd_sp_negatives$Estimate$Estimate_FibroblastI,
-  FibroblastII = resd_sp_negatives$Estimate$Estimate_FibroblastII,
-  Lymphocyte = resd_sp_negatives$Estimate$Estimate_Lymphocyte,
-  Macrophage = resd_sp_negatives$Estimate$Estimate_Macrophage,
-  Mesothelial = resd_sp_negatives$Estimate$Estimate_Mesothelial,
-  Pericyte = resd_sp_negatives$Estimate$Estimate_Pericyte,
-  EndothelialI = resd_sp_negatives$Estimate$Estimate_EndothelialI,
-  EndothelialII = resd_sp_negatives$Estimate$Estimate_EndothelialII
+  VSMCI = resd_sp_positives$Estimate$Estimate_VSMCI,
+  VSMCII = resd_sp_positives$Estimate$Estimate_VSMCII,
+  FibroblastI = resd_sp_positives$Estimate$Estimate_FibroblastI,
+  FibroblastII = resd_sp_positives$Estimate$Estimate_FibroblastII,
+  Lymphocyte = resd_sp_positives$Estimate$Estimate_Lymphocyte,
+  Macrophage = resd_sp_positives$Estimate$Estimate_Macrophage,
+  Mesothelial = resd_sp_positives$Estimate$Estimate_Mesothelial,
+  Pericyte = resd_sp_positives$Estimate$Estimate_Pericyte,
+  EndothelialI = resd_sp_positives$Estimate$Estimate_EndothelialI,
+  EndothelialII = resd_sp_positives$Estimate$Estimate_EndothelialII
                 )
 
 # Pre-process each vector in the list.
 preproc_stats_list <- lapply(gene_stats_list, function(gene_stats_vector) {
-  names(gene_stats_vector) <- rownames(resd_sp_negatives$Estimate)
+  names(gene_stats_vector) <- rownames(resd_sp_positives$Estimate)
   gene_stats_vector <- na.omit(gene_stats_vector)
-  gene_stats_vector <- sort(gene_stats_vector, decreasing = FALSE)
+  gene_stats_vector <- sort(gene_stats_vector, decreasing = TRUE)
   return(gene_stats_vector)
 })
 
@@ -320,26 +317,26 @@ GSA - mremaR  -- all
 library(msigdbr)
 library(clusterProfiler)
 
-msigdb_c5_df <- read.gmt("c2.cp.v2025.1.Hs.symbols.gmt")
-msigdb_c5_sets <- split(msigdb_c5_df$gene, msigdb_c5_df$term)
-
 full.gsa <- lapply(1:10, function(ct) {
   data <- data.frame(
-    genes = rownames(resd_sp_negatives$Estimate),
-    lfc = resd_sp_negatives$Estimate[, ct],
-    lfcSE = resd_sp_negatives$se[, ct]
+    genes = rownames(resd_sp_positives$Estimate),
+    lfc = resd_sp_positives$Estimate[, ct],
+    lfcSE = resd_sp_positives$se[, ct]
   )
 
   mremaR::REtest(data, log2(2), msigdb_c5_sets)
 })
 
-names(full.gsa) <- colnames(resd_sp_negatives$Estimate)[c(1:10)]
-saveRDS(full.gsa, file = "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/mremaR_results/c2_cp_negatives_non_p.RDS")
+names(full.gsa) <- colnames(resd_sp_positives$Estimate)[c(1:10)]
+saveRDS(full.gsa, file = "/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/mremaR_results/c5_go_positives_non_p.RDS")
+
+#mremaR::REshine()
+#full.gsa
 ```
 
 If the results are already saved in RDS file
 ```{r}
-mremaR_go <- readRDS("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/mremaR_results/c2_cp_negatives_non_p.RDS")
+mremaR_go <- readRDS("/home/mchopra/Documents/PhD-Year1/deconvolution/Deconvolution_results/results/with_batchs/hires/hires_age_associations/gsea_spearman/mremaR_results/c5_go_positives_non_p.RDS")
 
 VSMCI <- subset(mremaR_go$Estimate_VSMCI$results, P.value<0.05)
 VSMCII <- subset(mremaR_go$Estimate_VSMCII$results, P.value<0.05)
@@ -357,14 +354,9 @@ all_mremaR_go <- list(VSMCI, VSMCII, fibroblastI, fibroblastII, Pericyte, Endoth
 names(all_mremaR_go) <- c("VSMCI", "VSMCII", "Fibroblast-I", "Fibroblast-II", "Pericyte", "Endothelial-I", "Endothelial-II", "Lymphocyte", "Macrophage", "Mesothelial")
 ```
 
-
 ORA - fgsea 
 ```{r}
 library(fgsea)
-
-# Load pathways
-msigdb_c5_df <- read.gmt("c2.cp.v2025.1.Hs.symbols.gmt")
-msigdb_c5_sets <- split(msigdb_c5_df$gene, msigdb_c5_df$term)
 
 # Define the BACKGROUND gene list from the full results table.
 # This will be the same for all 12 analyses.
@@ -375,8 +367,8 @@ all_ora_results <- lapply(experiment_columns, function(col_name) {
   message(paste("--- Running ORA for experiment:", col_name, "---"))
   
   # A. Define the FOREGROUND genes using your exact logic.
-  foreground_values <- resd_sp_negatives_sign$Estimate[[col_name]]
-  names(foreground_values) <- rownames(resd_sp_negatives_sign$Estimate)
+  foreground_values <- resd_sp_positives_sign$Estimate[[col_name]]
+  names(foreground_values) <- rownames(resd_sp_positives_sign$Estimate)
   foreground_values <- na.omit(foreground_values)
   foreground_genes <- names(foreground_values)
   
@@ -456,7 +448,6 @@ common_pathways_lymphocyte
 common_pathways_macrophage
 common_pathways_mesothelial
 common_pathways_pericyte
-
 ```
 
 ```{R}
@@ -481,69 +472,4 @@ XX <- ggplot(all_three_common,
      theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 0.5))
 XX
 ```
-
-
-#below if you want common in between two lists
-common between fGSEA and mremaR 
-
-# Find common pathways
-common_pathways_VSMCI <- intersect(fgsea_sig_list$VSMCI$pathway, all_ora_results$Estimate_VSMCI$pathway)
-common_VSMCI <- fgsea_sig_list$VSMCI[fgsea_sig_list$VSMCI$pathway %in% common_pathways_VSMCI, ]
-common_VSMCI$celltype <- "VSMCI"
-
-common_pathways_VSMCII <- intersect(fgsea_sig_list$VSMCII$pathway, all_ora_results$Estimate_VSMCII$pathway)
-common_VSMCII <- fgsea_sig_list$VSMCII[fgsea_sig_list$VSMCII$pathway %in% common_pathways_VSMCII, ]
-common_VSMCII$celltype <- "VSMCII"
-
-common_pathways_fibroblastI <- intersect(fgsea_sig_list$FibroblastI$pathway, all_ora_results$Estimate_FibroblastI$pathway)
-common_fibroblastI <- fgsea_sig_list$FibroblastI[fgsea_sig_list$FibroblastI$pathway %in% common_pathways_fibroblastI, ]
-common_fibroblastI$celltype <- "Fibroblast-I"
-
-common_pathways_fibroblastII <- intersect(fgsea_sig_list$FibroblastII$pathway, all_ora_results$Estimate_FibroblastII$pathway)
-common_fibroblastII <- fgsea_sig_list$FibroblastII[fgsea_sig_list$FibroblastII$pathway %in% common_pathways_fibroblastII, ]
-common_fibroblastII$celltype <- "Fibroblast-II"
-
-common_pathways_EndothelialI <- intersect(fgsea_sig_list$EndothelialI$pathway, all_mremaR_go$`Endothelial-I`$Gene.Set)
-common_EndothelialI <- fgsea_sig_list$EndothelialI[fgsea_sig_list$EndothelialI$pathway %in% common_pathways_EndothelialI, ]
-common_EndothelialI$celltype <- "Endothelial-I"
-
-common_pathways_EndothelialII <- intersect(fgsea_sig_list$EndothelialII$pathway, all_mremaR_go$`Endothelial-II`$Gene.Set)
-common_EndothelialII <- fgsea_sig_list$EndothelialII[fgsea_sig_list$EndothelialII$pathway %in% common_pathways_EndothelialII, ]
-common_EndothelialII$celltype <- "Endothelial-II"
-
-common_pathways_lymphocyte <- intersect(fgsea_sig_list$Lymphocyte$pathway, all_mremaR_go$Lymphocyte$Gene.Set)
-common_lymphocyte <- fgsea_sig_list$Lymphocyte[fgsea_sig_list$Lymphocyte$pathway %in% common_pathways_lymphocyte, ]
-common_lymphocyte$celltype <- "Lymphocyte"
-
-common_pathways_Macrophage <- intersect(fgsea_sig_list$Macrophage$pathway, all_mremaR_go$Macrophage$Gene.Set)
-common_Macrophage <- fgsea_sig_list$Macrophage[fgsea_sig_list$Macrophage$pathway %in% common_pathways_Macrophage, ]
-common_Macrophage$celltype <- "Macrophage"
-
-common_pathways_Mesothelial <- intersect(fgsea_sig_list$Mesothelial$pathway, all_mremaR_go$Mesothelial$Gene.Set)
-common_Mesothelial <- fgsea_sig_list$Mesothelial[fgsea_sig_list$Mesothelial$pathway %in% common_pathways_Mesothelial, ]
-common_Mesothelial$celltype <- "Mesothelial"
-
-common_pathways_Pericyte <- intersect(fgsea_sig_list$Pericyte$pathway, all_mremaR_go$Pericyte$Gene.Set)
-common_Pericyte <- fgsea_sig_list$Pericyte[fgsea_sig_list$Pericyte$pathway %in% common_pathways_Pericyte, ]
-common_Pericyte$celltype <- "Pericyte"
-
-common_pathways_Neuronal <- intersect(fgsea_sig_list$Neuronal$pathway, all_mremaR_go$Neuronal$Gene.Set)
-common_Neuronal<- fgsea_sig_list$Neuronal[fgsea_sig_list$Neuronal$pathway %in% common_pathways_Neuronal, ]
-common_Neuronal$celltype <- "Neuronal"
-
-all_common <- rbind(common_VSMCI, common_VSMCII, common_fibroblastI, common_fibroblastII, common_EndothelialI, common_EndothelialII, common_lymphocyte, common_Macrophage, common_Mesothelial, common_Pericyte, common_Neuronal)
-
-library(ggplot2)
-gg <- ggplot(all_common, 
-       aes(x = celltype, y = pathway, colour = padj, size = size)) +
-      geom_point() +
-      theme_minimal() +
-     theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 0.5))
-gg
-
-
-
-
-
-
 
